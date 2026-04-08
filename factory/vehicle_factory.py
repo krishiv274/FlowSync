@@ -1,0 +1,2 @@
+"""Vehicle factory utilities."""
+

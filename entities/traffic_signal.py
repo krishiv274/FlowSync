@@ -1,0 +1,2 @@
+"""Traffic signal entity definitions."""
+

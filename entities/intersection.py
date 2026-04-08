@@ -1,0 +1,2 @@
+"""Intersection entity definitions."""
+
