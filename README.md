@@ -36,17 +36,22 @@ The repository already contains these modules and interfaces as a scaffold, with
 
 ```text
 FlowSync/
-├── main.py
-├── settings.py
-├── requirements.txt
-├── core/
-├── entities/
-├── physics/
-├── simulation/
-├── rendering/
-├── factory/
-├── utils/
-└── assets/
+├── src/
+│   ├── assets/
+│   ├── core/
+│   ├── entities/
+│   ├── factory/
+│   ├── physics/
+│   ├── rendering/
+│   ├── simulation/
+│   ├── utils/
+│   ├── main.py
+│   ├── requirements.txt
+│   └── settings.py
+├── diagrams
+├── docs
+├── LICENSE
+└── README.md
 ```
 
 ## Requirements
@@ -59,13 +64,13 @@ FlowSync/
 ```bash
 git clone https://github.com/krishiv274/FlowSync.git
 cd FlowSync
-python -m pip install -r requirements.txt
+python -m pip install -r src/requirements.txt
 ```
 
 ## Run
 
 ```bash
-python main.py
+python src/main.py
 ```
 
 ## Roadmap

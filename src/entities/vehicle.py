@@ -12,7 +12,8 @@ class Car:
         self.velocity = 2
 
     def update(self):
-        self.x = CarUpdate.update(self.x)
+        self.x += self.velocity
+        
 
     def draw(self, screen):
         import pygame
