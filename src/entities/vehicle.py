@@ -1,6 +1,6 @@
 class CarUpdate:
     #singleton implemented
-    def update(self):
+    def update(self, dt, lead_vehicle):
         return self
 
 class Car:
@@ -11,7 +11,7 @@ class Car:
         self.height = 20
         self.velocity = 2
 
-    def update(self):
+    def update(self, dt, lead_vehicle):
         self.x += self.velocity
         
 

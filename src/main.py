@@ -38,7 +38,7 @@ while True:
 
     # Draw and update cars
     for car in cars:
-        car.update()
+        car.update(0, None)
         car.draw(screen)
 
     # Update display
