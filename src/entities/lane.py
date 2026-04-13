@@ -8,6 +8,8 @@ class Lane:
 
     def add_vehicle(self, vehicle):
         vehicle.lane = self
+        if not hasattr(vehicle, 'position'):
+            vehicle.position = 0.0
         self.vehicles.append(vehicle)
         self.sort_vehicles()
 
@@ -20,20 +22,24 @@ class Lane:
             vehicle.lane = None
 
     def sort_vehicles(self):
-        self.vehicles.sort(key=lambda v: v.position)
+        # Sort front (highest position) to back
+        self.vehicles.sort(key=lambda v: getattr(v, 'position', 0.0), reverse=True)
 
     def get_lead_vehicle(self, vehicle):
+        # With descending order, the lead vehicle is the one BEFORE in the list
         for i, v in enumerate(self.vehicles):
             if v == vehicle:
-                if i + 1 < len(self.vehicles):
-                    return self.vehicles[i + 1]
+                if i - 1 >= 0:
+                    return self.vehicles[i - 1]
                 return None
         return None
 
     def distance_to_end(self, vehicle):
-        return max(0, self.length - vehicle.position)
+        pos = getattr(vehicle, 'position', 0.0)
+        return max(0, self.length - pos)
 
     def update(self, dt):
+        # Ensure ordering before update (safe even if manager already sorted)
         self.sort_vehicles()
         vehicles_copy = self.vehicles[:]
 
