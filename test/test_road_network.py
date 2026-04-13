@@ -66,6 +66,7 @@ def test_full_system():
 
     fetched_signal = intersection.get_signal_for_lane(lane)
     print("Signal for lane:", fetched_signal.state)
+    assert intersection.get_signal_for_lane(lane) is not None
 
     # Expect: GREEN
 
