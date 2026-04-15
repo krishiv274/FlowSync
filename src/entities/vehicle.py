@@ -1,20 +1,25 @@
-class CarUpdate:
-    #singleton implemented
-    def update(self, dt, lead_vehicle):
-        return self
+class Vehicle:
+    def __init__(self, position, velocity, acceleration=0):
+        self.position = position
+        self.velocity = velocity
+        self.acceleration = acceleration
 
-class Car:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-        self.width = 40
-        self.height = 20
-        self.velocity = 2
+    def update(self, dt, lead=None):
+        self.acceleration = 0
+        safe = 5
 
-    def update(self, dt, lead_vehicle):
-        self.x += self.velocity
-        
+        if lead:
+            gap = lead.position - self.position
+            if gap < safe:
+                self.acceleration = -5
+            else:
+                self.acceleration = 1
+        else:
+            self.acceleration = 2
 
-    def draw(self, screen):
-        import pygame
-        pygame.draw.rect(screen, (220, 90, 90), (self.x, self.y, self.width, self.height))
+        self.velocity += self.acceleration * dt
+
+        if self.velocity < 0:
+            self.velocity = 0
+
+        self.position += self.velocity * dt
