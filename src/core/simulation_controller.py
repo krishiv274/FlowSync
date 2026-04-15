@@ -14,12 +14,14 @@ class SimulationController:
         self.renderer = Renderer()
         self.running = True
         self.dt = 0.1
-        self.max_steps = None  # Optional limit for testing loops
+        self.max_steps = 20  # Fixed-step default for integration validation
 
     def run(self):
         """Main simulation loop."""
         steps = 0
         while self.running:
+            frame_number = steps + 1
+            print(f"Frame {frame_number}")
             self.update(self.dt)
             steps += 1
             if self.max_steps is not None and steps >= self.max_steps:
