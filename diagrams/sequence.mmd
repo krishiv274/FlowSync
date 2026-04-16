@@ -1,0 +1,23 @@
+sequenceDiagram
+    participant User
+    participant SimulationController
+    participant TrafficManager
+    participant Vehicle
+    participant PhysicsModel
+    participant TrafficSignal
+
+    User->>SimulationController: start()
+
+    loop each frame
+        SimulationController->>TrafficManager: update(dt)
+
+        TrafficManager->>TrafficSignal: update()
+
+        TrafficSignal-->>Vehicle: notify(state change)
+
+        TrafficManager->>Vehicle: update(dt)
+
+        Vehicle->>PhysicsModel: computeAcceleration()
+
+        Vehicle->>Vehicle: applyAcceleration()
+    end

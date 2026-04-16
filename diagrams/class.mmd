@@ -1,0 +1,161 @@
+classDiagram
+
+%% ========================
+%% LEGEND
+%% ========================
+
+class LEGEND {
+    <<Legend>>
+    <|--  Inheritance
+    <|..  Interface Implementation
+    *--   Composition (strong ownership)
+    o--   Aggregation (weak ownership)
+    -->   Association / Dependency
+    ..>   Creation Dependency (Factory)
+}
+
+%% ========================
+%% CORE CONTROLLERS
+%% ========================
+
+class SimulationController {
+    +run()
+    +update(dt)
+    +reset()
+}
+
+class TrafficManager {
+    +update(dt)
+    +spawnVehicle()
+    +updateSignals()
+}
+
+SimulationController --> TrafficManager : uses
+SimulationController --> Renderer : uses
+
+%% ========================
+%% ROAD NETWORK
+%% ========================
+
+class Road {
+    -id: int
+    -lanes: List[Lane]
+    +addLane()
+}
+
+class Lane {
+    -id: int
+    -vehicles: List[Vehicle]
+    +addVehicle()
+}
+
+class Intersection {
+    -id: int
+    -signals: List[TrafficSignal]
+}
+
+Road *-- "1..*" Lane : composition
+Road o-- "0..*" Intersection : aggregation
+Lane o-- "0..*" Vehicle : aggregation
+
+%% ========================
+%% VEHICLE
+%% ========================
+
+class Vehicle {
+    -id: int
+    -position: float
+    -velocity: float
+    -acceleration: float
+
+    -physicsModel: IPhysicsModel
+    -brakingStrategy: IBrakingStrategy
+
+    +update(dt)
+    +applyAcceleration()
+    +onSignalChange(state)
+}
+
+%% ========================
+%% PHYSICS (STRATEGY + DIP)
+%% ========================
+
+class IPhysicsModel {
+    <<interface>>
+    +computeAcceleration(vehicle, leadVehicle)
+}
+
+class IDMModel {
+    +computeAcceleration(vehicle, leadVehicle)
+}
+
+IPhysicsModel <|.. IDMModel : implements
+Vehicle --> IPhysicsModel : depends (DIP + Strategy)
+
+%% ========================
+%% BRAKING STRATEGY
+%% ========================
+
+class IBrakingStrategy {
+    <<interface>>
+    +shouldBrake(vehicle, env)
+}
+
+class EmergencyBrake {
+    +shouldBrake(vehicle, env)
+}
+
+class SignalBrake {
+    +shouldBrake(vehicle, env)
+}
+
+IBrakingStrategy <|.. EmergencyBrake : implements
+IBrakingStrategy <|.. SignalBrake : implements
+
+Vehicle --> IBrakingStrategy : strategy
+
+%% ========================
+%% OBSERVER PATTERN
+%% ========================
+
+class TrafficSignal {
+    -state: string
+    -observers: List[Vehicle]
+
+    +attach(vehicle)
+    +detach(vehicle)
+    +notify()
+}
+
+TrafficSignal --> Vehicle : notify (Observer)
+Vehicle --> TrafficSignal : subscribe
+
+%% ========================
+%% FACTORY
+%% ========================
+
+class VehicleFactory {
+    +createVehicle(type): Vehicle
+}
+
+VehicleFactory ..> Vehicle : creates (Factory)
+
+%% ========================
+%% INHERITANCE (VEHICLE TYPES)
+%% ========================
+
+class Car
+class Truck
+class Bike
+
+Vehicle <|-- Car
+Vehicle <|-- Truck
+Vehicle <|-- Bike
+
+%% ========================
+%% RENDERING
+%% ========================
+
+class Renderer {
+    +draw()
+}

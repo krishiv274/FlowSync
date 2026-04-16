@@ -1,0 +1,21 @@
+flowchart TD
+    User -->|Start / Pause / Reset| SimulationController
+    User -->|Change Parameters| SimulationController
+
+    SimulationController --> TrafficManager
+    SimulationController --> Renderer
+
+    TrafficManager -->|Spawn Vehicles| VehicleFactory
+    TrafficManager -->|Update Signals| TrafficSignalSystem
+    TrafficManager -->|Manage Roads| RoadNetwork
+
+    Vehicle -->|Subscribe| TrafficSignal
+    TrafficSignal -->|Notify State Change| Vehicle
+
+    Vehicle -->|Uses| PhysicsEngine
+    PhysicsEngine --> IDMModel
+    PhysicsEngine --> BrakingStrategy
+
+    Renderer -->|Draw| Vehicle
+    Renderer -->|Draw| RoadNetwork
+    Renderer -->|Draw| TrafficSignal
