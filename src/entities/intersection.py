@@ -13,6 +13,7 @@ class Intersection:
 
     def add_signal(self, lane, signal):
         self.signals[lane] = signal
+        return signal
 
     def get_signal_for_lane(self, lane):
-        return self.signals.get(lane, None)
+        return self.signals.get(lane)

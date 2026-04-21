@@ -10,7 +10,7 @@ class Vehicle:
         self.lane = None
 
     def update(self, dt, lead_vehicle):
-        self.position += 1
+        self.position += dt
 
 
 def test_multilane_sorting_and_leads():
@@ -41,6 +41,9 @@ def test_multilane_sorting_and_leads():
     for vehicle in (b1, b2, b3):
         assert vehicle.lane is lane_b
         assert lane_b.distance_to_end(vehicle) >= 0
+
+    lane_a.update(dt=0)
+    lane_b.update(dt=0)
 
     check_sorted(lane_a)
     check_sorted(lane_b)

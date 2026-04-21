@@ -5,7 +5,10 @@ class Road:
         self.lanes = []
 
     def add_lane(self, lane):
+        if lane in self.lanes:
+            return False
         self.lanes.append(lane)
+        return True
 
     def get_lane(self, index):
         if 0 <= index < len(self.lanes):
