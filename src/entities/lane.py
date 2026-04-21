@@ -78,5 +78,11 @@ class Lane:
             lead = self.get_lead_vehicle(vehicle)
             self._update_vehicle(vehicle, dt, lead)
 
+        # Debug-only invariant to catch ordering regressions during integration.
+        assert all(
+            self.vehicles[i].position <= self.vehicles[i + 1].position
+            for i in range(len(self.vehicles) - 1)
+        )
+
     def _update_vehicle(self, vehicle, dt, lead):
         self._update_fn(vehicle, dt, lead)

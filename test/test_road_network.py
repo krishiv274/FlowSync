@@ -25,12 +25,10 @@ class TrafficSignal:
 
 
 def test_full_system():
-    print("=== Creating Road + Lane ===")
     road = Road(1)
     lane = Lane(1)
     road.add_lane(lane)
 
-    print("=== Adding Vehicles ===")
     v1 = Vehicle(1, 10)
     v2 = Vehicle(2, 30)
     v3 = Vehicle(3, 20)
@@ -39,38 +37,24 @@ def test_full_system():
     lane.add_vehicle(v2)
     lane.add_vehicle(v3)
 
-    print("Vehicles after sorting:")
-    for v in lane.vehicles:
-        print(v.position)
-
-    # Expect: 10, 20, 30
-
-    print("\n=== Testing Lead Vehicle ===")
     lead_v1 = lane.get_lead_vehicle(v1)
-    print("Lead of v1:", lead_v1.position if lead_v1 else None)
-    # Expect: 20
+    assert lead_v1 is v3
+    assert lead_v1.position == 20
 
-    print("\n=== Testing Road Update ===")
+    before_positions = [v.position for v in lane.vehicles]
     road.update(dt=1)
+    after_positions = [v.position for v in lane.vehicles]
+    assert sorted(after_positions) == [11, 21, 31]
+    assert after_positions != before_positions
 
-    print("Positions after update:")
-    for v in lane.vehicles:
-        print(v.position)
-    # Expect: all positions +1 → 11, 21, 31
-
-    print("\n=== Testing Intersection ===")
     intersection = Intersection(1)
 
     signal = TrafficSignal("GREEN")
     intersection.add_signal(lane, signal)
 
     fetched_signal = intersection.get_signal_for_lane(lane)
-    print("Signal for lane:", fetched_signal.state)
     assert intersection.get_signal_for_lane(lane) is not None
-
-    # Expect: GREEN
-
-    print("\n=== ALL TESTS COMPLETED ===")
+    assert fetched_signal.state == "GREEN"
 
 
 if __name__ == "__main__":
