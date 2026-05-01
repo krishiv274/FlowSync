@@ -32,6 +32,8 @@ class TrafficSignal:
 
 		self.state = self.RED
 		self.timer = float(self.cycle_times[self.RED])
+		# Observer list for vehicles or other listeners
+		self.observers: list = []
 
 	def update(self, dt: float) -> None:
 		"""Advance signal timer and switch state when timer elapses."""
@@ -54,7 +56,29 @@ class TrafficSignal:
 			self.state = self.RED
 
 		self.timer = float(self.cycle_times[self.state])
+		# Notify registered observers about the state change
+		self.notify()
 
 	def __repr__(self) -> str:
 		return f"TrafficSignal(id={self.id}, state={self.state}, timer={self.timer:.2f})"
+
+	def attach(self, vehicle) -> None:
+		"""Register a vehicle to receive signal updates."""
+		if vehicle not in self.observers:
+			self.observers.append(vehicle)
+
+	def detach(self, vehicle) -> None:
+		"""Unregister a vehicle."""
+		if vehicle in self.observers:
+			self.observers.remove(vehicle)
+
+	def notify(self) -> None:
+		"""Notify all observers about state change."""
+		for vehicle in list(self.observers):
+			if hasattr(vehicle, "on_signal_change"):
+				try:
+					vehicle.on_signal_change(self.state)
+				except Exception as e:
+					# Log observer errors but keep signal state machine running
+					print(f"[Signal Warning] Observer error: {e}")
 
