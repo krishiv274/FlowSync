@@ -10,7 +10,6 @@ class IDMModel(IPhysicsModel):
         self.desired_velocity = 30.0  # m/s
         self.max_acceleration = 3.0  # m/s^2
         self.comfortable_braking = 2.0  # m/s^2
-        self.comfortable_breaking = self.comfortable_braking  # compatibility alias
         self.minimum_distance = 2.0  # m
         self.time_headway = 1.5  # s
         self.delta = 4.0  # acceleration exponent
