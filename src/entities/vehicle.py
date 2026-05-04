@@ -8,45 +8,73 @@ class Vehicle:
         self.idm = physics_model
         self.braking = braking_strategy
 
+        # Stability constants.
+        self.max_acc = 2.5
+        self.max_decel = -5.0
+        self.min_gap = 2.0
+        self.max_jerk = 6.0
+
     def update(self, dt, lead_vehicle):
-        # --- 1. Compute safe gap ---
+        dt = max(0.0, dt)
+
+        # Lead gap used for IDM stability and overlap safety.
         if lead_vehicle:
             gap = max(0.1, lead_vehicle.position - self.position)
         else:
             gap = float("inf")
 
-        # --- 2. IDM acceleration (no fallback / enforce correct API) ---
-        acc = self.idm.compute_acceleration(self, lead_vehicle, gap)
+        # IDM acceleration with safety clamps.
+        try:
+            acc = self.idm.compute_acceleration(self, lead_vehicle, gap)
+        except TypeError:
+            acc = self.idm.compute_acceleration(self, lead_vehicle)
 
-        # --- 3. Signal awareness ---
+        # Signal-aware braking: treat red signal as a stopped vehicle.
+        signal = None
         if self.lane and self.lane.intersection:
             signal = self.lane.intersection.get_signal_for_lane(self.lane)
 
-            if signal and signal.state == "RED":
-                dist_to_signal = self.lane.distance_to_end(self)
+        if signal and signal.state == "RED":
+            dist_to_signal = self.lane.distance_to_end(self)
+            acc = min(acc, self._signal_braking_acc(dist_to_signal))
 
-                # Only apply braking when near signal
-                if dist_to_signal < 50:
-                    brake_acc = self._braking_acceleration(dist_to_signal)
-                    acc = min(acc, brake_acc)
+        # Clamp acceleration to realistic limits.
+        acc = max(self.max_decel, min(self.max_acc, acc))
 
-        # --- 4. Update kinematics ---
-        self.velocity += acc * dt
-        self.velocity = max(0, self.velocity)
-        self.position += self.velocity * dt
+        # Smooth sudden changes to avoid oscillations.
+        max_delta = self.max_jerk * dt
+        if acc > self.acceleration + max_delta:
+            acc = self.acceleration + max_delta
+        elif acc < self.acceleration - max_delta:
+            acc = self.acceleration - max_delta
 
-    def _braking_acceleration(self, distance_to_signal):
-        # Strong default braking if no strategy provided
-        if self.braking is None:
-            comfortable_braking = getattr(self.idm, "comfortable_braking", 2.0)
-            return -abs(comfortable_braking)
+        # Update velocity and position in order with overshoot protection.
+        new_velocity = self.velocity + acc * dt
+        if new_velocity < 0:
+            # Prevent backward motion and position overshoot.
+            if self.velocity > 0 and acc < 0 and dt > 0:
+                t_stop = self.velocity / (-acc)
+                if t_stop < dt:
+                    self.position += self.velocity * t_stop + 0.5 * acc * t_stop * t_stop
+            self.velocity = 0.0
+        else:
+            self.velocity = new_velocity
+            self.position += self.velocity * dt
 
-        if hasattr(self.braking, "compute"):
-            return self.braking.compute(self, distance_to_signal)
+        self.acceleration = acc
 
-        if hasattr(self.braking, "braking_deceleration"):
-            return self.braking.braking_deceleration(self, {"distance_to_signal": distance_to_signal})
+        # Guarantee no overlap with the lead vehicle.
+        if lead_vehicle:
+            max_pos = lead_vehicle.position - self.min_gap
+            if self.position > max_pos:
+                self.position = max_pos
+                self.velocity = min(self.velocity, getattr(lead_vehicle, "velocity", 0.0))
 
-        # Fallback safety
-        comfortable_braking = getattr(self.idm, "comfortable_braking", 2.0)
-        return -abs(comfortable_braking)
+    def _signal_braking_acc(self, distance_to_signal):
+        distance = max(0.1, distance_to_signal - self.min_gap)
+        if distance <= 0:
+            return self.max_decel
+
+        # Kinematic braking to stop before the signal line.
+        required = -(self.velocity * self.velocity) / (2.0 * distance)
+        return max(self.max_decel, required)
