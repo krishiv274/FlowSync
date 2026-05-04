@@ -1,6 +1,13 @@
 """Traffic signal entity definitions."""
 
 from __future__ import annotations
+from typing import Protocol, List
+
+
+class SignalObserver(Protocol):
+	def on_signal_change(self, state: str) -> None:
+		...
+
 
 class TrafficSignal:
 	"""Timer-driven traffic signal state machine."""
@@ -8,6 +15,12 @@ class TrafficSignal:
 	RED = "RED"
 	GREEN = "GREEN"
 	YELLOW = "YELLOW"
+
+	TRANSITIONS = {
+		RED: GREEN,
+		GREEN: YELLOW,
+		YELLOW: RED,
+	}
 
 	def __init__(
 		self,
@@ -33,7 +46,7 @@ class TrafficSignal:
 		self.state = self.RED
 		self.timer = float(self.cycle_times[self.RED])
 		# Observer list for vehicles or other listeners
-		self.observers: list = []
+		self.observers: List[SignalObserver] = []
 
 	def update(self, dt: float) -> None:
 		"""Advance signal timer and switch state when timer elapses."""
@@ -48,13 +61,7 @@ class TrafficSignal:
 
 	def change_state(self) -> None:
 		"""Advance through RED -> GREEN -> YELLOW -> RED."""
-		if self.state == self.RED:
-			self.state = self.GREEN
-		elif self.state == self.GREEN:
-			self.state = self.YELLOW
-		else:
-			self.state = self.RED
-
+		self.state = self.TRANSITIONS[self.state]
 		self.timer = float(self.cycle_times[self.state])
 		# Notify registered observers about the state change
 		self.notify()
@@ -71,12 +78,12 @@ class TrafficSignal:
 	def is_yellow(self) -> bool:
 		return self.state == self.YELLOW
 
-	def attach(self, vehicle) -> None:
+	def attach(self, vehicle: SignalObserver) -> None:
 		"""Register a vehicle to receive signal updates."""
 		if vehicle not in self.observers:
 			self.observers.append(vehicle)
 
-	def detach(self, vehicle) -> None:
+	def detach(self, vehicle: SignalObserver) -> None:
 		"""Unregister a vehicle."""
 		if vehicle in self.observers:
 			self.observers.remove(vehicle)
@@ -84,10 +91,9 @@ class TrafficSignal:
 	def notify(self) -> None:
 		"""Notify all observers about state change."""
 		for vehicle in list(self.observers):
-			if hasattr(vehicle, "on_signal_change"):
-				try:
-					vehicle.on_signal_change(self.state)
-				except Exception as e:
-					# Log observer errors but keep signal state machine running
-					print(f"[Signal Warning] Observer error: {e}")
+			try:
+				vehicle.on_signal_change(self.state)
+			except Exception as e:
+				# Log observer errors but keep signal state machine running
+				print(f"[Signal Warning] Observer error: {e}")
 
