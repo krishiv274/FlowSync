@@ -1,46 +1,52 @@
-from typing import Any, Optional
-
-
 class Vehicle:
-    def __init__(self, position, velocity, physics_model, acceleration=0, braking_strategy: Optional[Any] = None):
+    def __init__(self, position, velocity, physics_model, acceleration=0, braking_strategy=None):
         self.position = position
         self.velocity = velocity
         self.acceleration = acceleration
-        self.physics_model = physics_model
-        self.braking_strategy = braking_strategy
-        self.signal_state = None
+        self.lane = None
 
-    def update(self, dt, lead=None, distance_to_signal=None):
-        # IDM is the default motion model.
-        if self.braking_strategy is None:
-            self.acceleration = self.physics_model.compute_acceleration(self, lead)
+        self.idm = physics_model
+        self.braking = braking_strategy
+
+    def update(self, dt, lead_vehicle):
+        # --- 1. Compute safe gap ---
+        if lead_vehicle:
+            gap = max(0.1, lead_vehicle.position - self.position)
         else:
-            # Provide context for braking decisions.
-            environment = {
-                "lead": lead,
-                "signal_state": self.signal_state,
-                "distance_to_signal": distance_to_signal,
-            }
-            # Braking is a safety override when required.
-            if self.braking_strategy.should_brake(self, environment):
-                self.acceleration = self._braking_deceleration(environment)
-            else:
-                self.acceleration = self.physics_model.compute_acceleration(self, lead)
+            gap = float("inf")
 
-        self.velocity += self.acceleration * dt
+        # --- 2. IDM acceleration (no fallback / enforce correct API) ---
+        acc = self.idm.compute_acceleration(self, lead_vehicle, gap)
 
-        if self.velocity < 0:
-            self.velocity = 0
+        # --- 3. Signal awareness ---
+        if self.lane and self.lane.intersection:
+            signal = self.lane.intersection.get_signal_for_lane(self.lane)
 
+            if signal and signal.state == "RED":
+                dist_to_signal = self.lane.distance_to_end(self)
+
+                # Only apply braking when near signal
+                if dist_to_signal < 50:
+                    brake_acc = self._braking_acceleration(dist_to_signal)
+                    acc = min(acc, brake_acc)
+
+        # --- 4. Update kinematics ---
+        self.velocity += acc * dt
+        self.velocity = max(0, self.velocity)
         self.position += self.velocity * dt
 
-    def on_signal_change(self, state):
-        self.signal_state = state
+    def _braking_acceleration(self, distance_to_signal):
+        # Strong default braking if no strategy provided
+        if self.braking is None:
+            comfortable_braking = getattr(self.idm, "comfortable_braking", 2.0)
+            return -abs(comfortable_braking)
 
-    def _braking_deceleration(self, environment):
-        bs = self.braking_strategy
-        if bs is not None and hasattr(bs, "braking_deceleration"):
-            return bs.braking_deceleration(self, environment)
+        if hasattr(self.braking, "compute"):
+            return self.braking.compute(self, distance_to_signal)
 
-        comfortable_braking = getattr(self.physics_model, "comfortable_braking", 2.0)
+        if hasattr(self.braking, "braking_deceleration"):
+            return self.braking.braking_deceleration(self, {"distance_to_signal": distance_to_signal})
+
+        # Fallback safety
+        comfortable_braking = getattr(self.idm, "comfortable_braking", 2.0)
         return -abs(comfortable_braking)
