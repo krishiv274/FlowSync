@@ -66,6 +66,35 @@ def test_update_advances_state_when_timer_elapses():
     assert signal.state == TrafficSignal.RED
 
 
+def test_helper_methods_reflect_state():
+    signal = TrafficSignal(
+        signal_id=5,
+        position=(0.0, 0.0),
+        cycle_times={
+            TrafficSignal.RED: 1.0,
+            TrafficSignal.GREEN: 1.0,
+            TrafficSignal.YELLOW: 1.0,
+        },
+    )
+
+    # initial state is RED
+    assert signal.is_red()
+    assert not signal.is_green()
+    assert not signal.is_yellow()
+
+    # advance to GREEN
+    signal.update(1.0)
+    assert signal.is_green()
+    assert not signal.is_red()
+    assert not signal.is_yellow()
+
+    # advance to YELLOW
+    signal.update(1.0)
+    assert signal.is_yellow()
+    assert not signal.is_red()
+    assert not signal.is_green()
+
+
 def run_with_logs() -> None:
     tests = [
         test_signal_state_constants_exist,

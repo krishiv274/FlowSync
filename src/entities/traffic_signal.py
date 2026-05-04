@@ -62,6 +62,15 @@ class TrafficSignal:
 	def __repr__(self) -> str:
 		return f"TrafficSignal(id={self.id}, state={self.state}, timer={self.timer:.2f})"
 
+	def is_red(self) -> bool:
+		return self.state == self.RED
+
+	def is_green(self) -> bool:
+		return self.state == self.GREEN
+
+	def is_yellow(self) -> bool:
+		return self.state == self.YELLOW
+
 	def attach(self, vehicle) -> None:
 		"""Register a vehicle to receive signal updates."""
 		if vehicle not in self.observers:

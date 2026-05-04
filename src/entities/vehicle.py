@@ -1,5 +1,8 @@
+from typing import Any, Optional
+
+
 class Vehicle:
-    def __init__(self, position, velocity, physics_model, acceleration=0, braking_strategy=None):
+    def __init__(self, position, velocity, physics_model, acceleration=0, braking_strategy: Optional[Any] = None):
         self.position = position
         self.velocity = velocity
         self.acceleration = acceleration
@@ -35,8 +38,9 @@ class Vehicle:
         self.signal_state = state
 
     def _braking_deceleration(self, environment):
-        if hasattr(self.braking_strategy, "braking_deceleration"):
-            return self.braking_strategy.braking_deceleration(self, environment)
+        bs = self.braking_strategy
+        if bs is not None and hasattr(bs, "braking_deceleration"):
+            return bs.braking_deceleration(self, environment)
 
         comfortable_braking = getattr(self.physics_model, "comfortable_braking", 2.0)
         return -abs(comfortable_braking)
