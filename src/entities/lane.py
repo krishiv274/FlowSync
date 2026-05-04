@@ -36,6 +36,9 @@ class Lane:
     def set_intersection(self, intersection):
         self.intersection = intersection
 
+    def set_update_fn(self, update_fn: Callable[[VehicleLike, float, Optional[VehicleLike]], None]) -> None:
+        self._update_fn = update_fn
+
     def remove_vehicle(self, vehicle):
         if vehicle in self.vehicles:
             self.vehicles.remove(vehicle)

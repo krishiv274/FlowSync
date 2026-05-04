@@ -1,6 +1,7 @@
 """Vehicle factory utilities."""
 
-from entities.vehicle import Car
+from entities.vehicle import Vehicle
+from physics.idm_model import IDMModel
 # Future imports can be added here (e.g., Truck, Bike)
 
 
@@ -8,7 +9,7 @@ class VehicleFactory:
     """Factory for creating vehicle instances."""
 
     registry = {
-        "car": Car,
+        "car": Vehicle,
     }
 
     @staticmethod
@@ -28,6 +29,6 @@ class VehicleFactory:
 
         if vehicle_type in VehicleFactory.registry:
             vehicle_class = VehicleFactory.registry[vehicle_type]
-            return vehicle_class(x=0, y=0)
+            return vehicle_class(position=0.0, velocity=0.0, physics_model=IDMModel())
 
         raise ValueError(f"Unknown vehicle type: {vehicle_type}")
