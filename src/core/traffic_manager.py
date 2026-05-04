@@ -90,14 +90,20 @@ class TrafficManager:
         1. Detect if there is a traffic signal ahead
         2. If signal is RED and vehicle is before signal:
            - Treat the signal as a virtual lead vehicle
-        3. Otherwise:
-           - Use the real lead vehicle
+        3. Choose the closest constraint (signal or real lead vehicle)
+        4. Otherwise use the real lead vehicle
         
         Args:
             dt: Time step in seconds
         """
-        # Get signal (simplified - use first signal if available)
+        # Step A: Get signal (simplified - use first signal if available)
         signal = self.signals[0] if self.signals else None
+        
+        # Step B: Extract signal position robustly
+        sig_pos = None
+        if signal:
+            pos = getattr(signal, "position", None)
+            sig_pos = pos[0] if isinstance(pos, tuple) else pos
         
         # Update all vehicles with signal-aware logic
         for vehicle in self.vehicles:
@@ -105,24 +111,44 @@ class TrafficManager:
             if not vehicle.lane:
                 continue
             
-            # Get the real lead vehicle from the lane
+            vehicle_pos = getattr(vehicle, "position", None)
+            if vehicle_pos is None:
+                continue
+            
+            # Step C: Get the real lead vehicle from the lane
             lead_vehicle = vehicle.lane.get_lead_vehicle(vehicle)
             
-            # Check if signal exists, is RED, and is ahead of vehicle
-            fake_lead = None
-            if signal and signal.is_red():
-                # Signal position is (x, y) tuple; use x-coordinate for lane position
-                signal_x = signal.position[0]
-                if vehicle.position < signal_x:
-                    # Create virtual lead at signal position
-                    fake_lead = VirtualLead(signal_x)
-                    print(f"Signal influence: ACTIVE")
+            # Step D: Determine effective lead (signal vs real lead vehicle)
+            effective_lead = lead_vehicle
+            signal_is_active = False
             
-            if not fake_lead:
-                print(f"Signal influence: NONE")
+            # Check if signal should influence vehicle
+            if signal and sig_pos is not None and signal.is_red():
+                if vehicle_pos < sig_pos:
+                    # Signal is ahead of vehicle
+                    virtual_lead = VirtualLead(sig_pos)
+                    
+                    # Choose the closest constraint ahead
+                    if lead_vehicle is None:
+                        # No real lead vehicle, use signal
+                        effective_lead = virtual_lead
+                        signal_is_active = True
+                    else:
+                        # Compare signal vs lead vehicle position
+                        lead_pos = getattr(lead_vehicle, "position", None)
+                        if lead_pos is None or sig_pos < lead_pos:
+                            # Signal is closer than lead vehicle
+                            effective_lead = virtual_lead
+                            signal_is_active = True
             
-            # Update vehicle with either virtual lead or real lead
-            vehicle.update(dt, fake_lead if fake_lead else lead_vehicle)
+            # Step E: Debug logging
+            print(
+                f"Signal influence={'YES' if signal_is_active else 'NO'} "
+                f"sig_pos={sig_pos} vehicle_pos={vehicle_pos}"
+            )
+            
+            # Step F: Update vehicle with effective lead
+            vehicle.update(dt, effective_lead)
 
     def update_signals(self, dt):
         """Update all traffic signals.
