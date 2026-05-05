@@ -17,3 +17,12 @@ class Intersection:
 
     def get_signal_for_lane(self, lane):
         return self.signals.get(lane)
+
+    def update(self, dt):
+        """Update all signals at this intersection.
+        
+        Args:
+            dt: Time step in seconds
+        """
+        for signal in self.signals.values():
+            signal.update(dt)

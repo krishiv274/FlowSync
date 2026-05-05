@@ -2,6 +2,7 @@
 
 from entities.road import Road
 from entities.lane import Lane
+from entities.intersection import Intersection
 from entities.traffic_signal import TrafficSignal
 from physics.braking.braking_system import BrakingSystem
 from factory.vehicle_factory import VehicleFactory
@@ -15,6 +16,7 @@ class TrafficManager:
         self.vehicles = []
         self.roads = []
         self.signals = []
+        self.intersections = []
         self.initialize_scene()
         # Scene initialized with at least one road, lane, vehicles, and a signal
 
@@ -43,45 +45,40 @@ class TrafficManager:
         lane.add_vehicle(vehicle2)
         self.vehicles.append(vehicle2)
 
+        # Create an intersection with a traffic signal
+        intersection = Intersection(intersection_id=1)
+        self.intersections.append(intersection)
+        
         # Create a traffic signal
         signal = TrafficSignal(signal_id=1, position=(500, 500))
         self.signals.append(signal)
+        
+        # Associate signal with lane in the intersection
+        intersection.add_signal(lane, signal)
+        lane.set_intersection(intersection)
+        
+        # Attach all vehicles as observers to the signal
         for vehicle in self.vehicles:
             self._attach_vehicle_to_signals(vehicle)
         signal.notify()
 
     def update(self, dt):
-        """Update all traffic entities.
+        """Update all traffic entities in the correct order.
+        
+        Update order (CRITICAL):
+        1. Update all intersections (which update signals)
+        2. Update all roads (vehicles react to current signal state)
         
         Args:
             dt: Time step in seconds
         """
-        self.update_signals(dt)
-        self.update_vehicles(dt)
-
-    def update_vehicles(self, dt):
-        """Update all vehicles in the simulation using the Road/Lane update path.
-
-        Args:
-            dt: Time step in seconds
-        """
-        signal = self.signals[0] if self.signals else None
-        sig_pos = self._signal_position(signal)
-        update_fn = self._build_lane_update_fn(sig_pos)
-
+        # Step 1: Update all intersections (signals first)
+        for intersection in self.intersections:
+            intersection.update(dt)
+        
+        # Step 2: Update all roads (lanes and vehicles)
         for road in self.roads:
-            for lane in road.lanes:
-                lane.set_update_fn(update_fn)
             road.update(dt)
-
-    def update_signals(self, dt):
-        """Update all traffic signals.
-        
-        Args:
-            dt: Time step in seconds
-        """
-        for signal in self.signals:
-            signal.update(dt)
 
     def spawn_vehicle(self):
         """Spawn a new vehicle and add to first lane."""
@@ -102,29 +99,3 @@ class TrafficManager:
     def _attach_vehicle_to_signals(self, vehicle):
         for signal in self.signals:
             signal.attach(vehicle)
-
-    def _signal_position(self, signal):
-        if signal is None:
-            return None
-        pos = getattr(signal, "position", None)
-        return pos[0] if isinstance(pos, tuple) else pos
-
-    def _build_lane_update_fn(self, sig_pos):
-        def update_fn(vehicle, dt, lead):
-            distance_to_signal = self._distance_to_signal(vehicle, sig_pos)
-            vehicle.update(dt, lead, distance_to_signal=distance_to_signal)
-
-        return update_fn
-
-    def _distance_to_signal(self, vehicle, sig_pos):
-        if sig_pos is None:
-            return None
-
-        vehicle_pos = getattr(vehicle, "position", None)
-        if vehicle_pos is None:
-            return None
-
-        if vehicle_pos >= sig_pos:
-            return None
-
-        return sig_pos - vehicle_pos
