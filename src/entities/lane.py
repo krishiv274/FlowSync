@@ -10,14 +10,37 @@ class VehicleLike(Protocol):
         ...
 
 
+class UpdateStrategy:
+    def update(self, vehicle: VehicleLike, dt: float, lead: Optional[VehicleLike]) -> None:
+        raise NotImplementedError
+
+
+class DefaultUpdateStrategy(UpdateStrategy):
+    def update(self, vehicle: VehicleLike, dt: float, lead: Optional[VehicleLike]) -> None:
+        vehicle.update(dt, lead)
+
+
+class _CallableUpdateStrategy(UpdateStrategy):
+    def __init__(self, update_fn: Callable[[VehicleLike, float, Optional[VehicleLike]], None]) -> None:
+        self._update_fn = update_fn
+
+    def update(self, vehicle: VehicleLike, dt: float, lead: Optional[VehicleLike]) -> None:
+        self._update_fn(vehicle, dt, lead)
+
+
 class Lane:
-    def __init__(self, lane_id, length=1000, width=3.5, update_fn: Optional[Callable[[VehicleLike, float, Optional[VehicleLike]], None]] = None):
+    def __init__(self, lane_id, length=1000, width=3.5, strategy: Optional[UpdateStrategy] = None, update_fn: Optional[Callable[[VehicleLike, float, Optional[VehicleLike]], None]] = None):
         self.id = lane_id
         self.length = length
         self.width = width
         self.vehicles = []
         self.intersection = None
-        self._update_fn = update_fn or (lambda vehicle, dt, lead: vehicle.update(dt, lead))
+        if strategy is not None:
+            self.strategy = strategy
+        elif update_fn is not None:
+            self.strategy = _CallableUpdateStrategy(update_fn)
+        else:
+            self.strategy = DefaultUpdateStrategy()
 
     def add_vehicle(self, vehicle):
         if vehicle in self.vehicles:
@@ -37,7 +60,10 @@ class Lane:
         self.intersection = intersection
 
     def set_update_fn(self, update_fn: Callable[[VehicleLike, float, Optional[VehicleLike]], None]) -> None:
-        self._update_fn = update_fn
+        self.strategy = _CallableUpdateStrategy(update_fn)
+
+    def set_update_strategy(self, strategy: UpdateStrategy) -> None:
+        self.strategy = strategy
 
     def remove_vehicle(self, vehicle):
         if vehicle in self.vehicles:
@@ -75,12 +101,20 @@ class Lane:
         return max(0, self.length - pos)
 
     def update(self, dt):
+        self._pre_update()
+        self._process_vehicles(dt)
+        self._post_update()
+
+    def _pre_update(self):
         # Maintain deterministic vehicle ordering once per tick.
         self.sort_vehicles()
+
+    def _process_vehicles(self, dt):
         for vehicle in list(self.vehicles):
             lead = self.get_lead_vehicle(vehicle)
             self._update_vehicle(vehicle, dt, lead)
 
+    def _post_update(self):
         # Debug-only invariant to catch ordering regressions during integration.
         assert all(
             self.vehicles[i].position <= self.vehicles[i + 1].position
@@ -88,4 +122,4 @@ class Lane:
         )
 
     def _update_vehicle(self, vehicle, dt, lead):
-        self._update_fn(vehicle, dt, lead)
+        self.strategy.update(vehicle, dt, lead)
