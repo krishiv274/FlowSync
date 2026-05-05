@@ -49,8 +49,9 @@ class TrafficManager:
         intersection = Intersection(intersection_id=1)
         self.intersections.append(intersection)
         
-        # Create a traffic signal
-        signal = TrafficSignal(signal_id=1, position=(500, 500))
+        # Create a traffic signal positioned on the road where vehicles can react to it
+        # Positioned at x=50 so vehicles starting at 0 and 20 will see it approaching
+        signal = TrafficSignal(signal_id=1, position=(50, 20))
         self.signals.append(signal)
         
         # Associate signal with lane in the intersection
@@ -93,7 +94,8 @@ class TrafficManager:
 
     def _configure_vehicle(self, vehicle):
         if getattr(vehicle, "braking_strategy", None) is None:
-            vehicle.braking_strategy = BrakingSystem()
+            # Use BrakingSystem with increased stop_distance for better signal visibility
+            vehicle.braking_strategy = BrakingSystem(stop_distance=30.0)
         self._attach_vehicle_to_signals(vehicle)
 
     def _attach_vehicle_to_signals(self, vehicle):

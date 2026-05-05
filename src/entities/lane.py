@@ -122,4 +122,27 @@ class Lane:
         )
 
     def _update_vehicle(self, vehicle, dt, lead):
-        self.strategy.update(vehicle, dt, lead)
+        """Update a single vehicle with lead vehicle and signal awareness.
+        
+        Args:
+            vehicle: The vehicle to update
+            dt: Time step
+            lead: The lead vehicle (if any)
+        """
+        # Calculate distance to signal if intersection exists
+        distance_to_signal = None
+        if self.intersection is not None:
+            signal = self.intersection.get_signal_for_lane(self)
+            if signal is not None:
+                signal_pos = getattr(signal, "position", (0, 0))
+                if isinstance(signal_pos, tuple) and len(signal_pos) >= 1:
+                    signal_x = signal_pos[0]
+                    vehicle_pos = getattr(vehicle, "position", 0.0)
+                    if vehicle_pos < signal_x:
+                        distance_to_signal = signal_x - vehicle_pos
+        
+        # Update vehicle with lead and signal info
+        if hasattr(vehicle, 'update'):
+            vehicle.update(dt, lead=lead, distance_to_signal=distance_to_signal)
+        else:
+            self.strategy.update(vehicle, dt, lead)

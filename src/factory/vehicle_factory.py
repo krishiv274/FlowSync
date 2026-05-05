@@ -11,6 +11,8 @@ class VehicleFactory:
     registry = {
         "car": Vehicle,
     }
+    
+    _id_counter = 0
 
     @staticmethod
     def create_vehicle(vehicle_type):
@@ -20,7 +22,7 @@ class VehicleFactory:
             vehicle_type: Type of vehicle to create (e.g., "car")
             
         Returns:
-            Vehicle instance
+            Vehicle instance with assigned ID
         """
         if not isinstance(vehicle_type, str):
             raise TypeError("vehicle_type must be a string")
@@ -29,6 +31,10 @@ class VehicleFactory:
 
         if vehicle_type in VehicleFactory.registry:
             vehicle_class = VehicleFactory.registry[vehicle_type]
-            return vehicle_class(position=0.0, velocity=0.0, physics_model=IDMModel())
+            vehicle = vehicle_class(position=0.0, velocity=0.0, physics_model=IDMModel())
+            # Assign unique ID
+            VehicleFactory._id_counter += 1
+            vehicle.id = VehicleFactory._id_counter
+            return vehicle
 
         raise ValueError(f"Unknown vehicle type: {vehicle_type}")
