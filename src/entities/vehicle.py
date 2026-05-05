@@ -1,16 +1,22 @@
 class Vehicle:
+    MIN_VELOCITY = 0.0
+    MIN_ACCELERATION = -10.0
+    MAX_ACCELERATION = 5.0
+    DEFAULT_BRAKING_DECELERATION = -2.0
+
     def __init__(self, position, velocity, physics_model=None, acceleration=0, braking_strategy=None):
-        self.position = position
-        self.velocity = velocity
-        self.acceleration = acceleration
+        if isinstance(physics_model, (int, float)):
+            acceleration = physics_model
+            physics_model = None
+        elif physics_model is not None and not hasattr(physics_model, "compute_acceleration"):
+            physics_model = None
+
+        self.position = float(position)
+        self.velocity = max(self.MIN_VELOCITY, float(velocity))
+        self.acceleration = self._clamp_acceleration(float(acceleration))
         self.physics_model = physics_model
         self.braking_strategy = braking_strategy
         self.signal_state = None
-
-        if not hasattr(self.physics_model, "compute_acceleration"):
-            if isinstance(self.physics_model, (int, float)):
-                self.acceleration = float(self.physics_model)
-            self.physics_model = None
 
     def update(self, dt, lead_vehicle=None, distance_to_signal=None, **kwargs):
         if lead_vehicle is None and "lead" in kwargs:
@@ -20,31 +26,16 @@ class Vehicle:
             distance_to_signal = self._distance_to_signal_from_lane()
 
         previous_position = self.position
-        # IDM is the default motion model.
-        if self.braking_strategy is None:
-            if self.physics_model is None:
-                self.acceleration = float(self.acceleration)
-            else:
-                self.acceleration = self.physics_model.compute_acceleration(self, lead_vehicle)
+        environment = self._build_environment(lead_vehicle, distance_to_signal)
+
+        # Braking is selected before normal physics, then motion is applied once.
+        if self.braking_strategy and self.braking_strategy.should_brake(self, environment):
+            acceleration = self._braking_deceleration(environment)
         else:
-            # Provide context for braking decisions.
-            environment = {
-                "lead": lead_vehicle,
-                "signal_state": self.signal_state,
-                "distance_to_signal": distance_to_signal,
-            }
-            # Braking is a safety override when required.
-            if self.braking_strategy.should_brake(self, environment):
-                self.acceleration = self._braking_deceleration(environment)
-            elif self.physics_model is None:
-                self.acceleration = float(self.acceleration)
-            else:
-                self.acceleration = self.physics_model.compute_acceleration(self, lead_vehicle)
+            acceleration = self._physics_acceleration(lead_vehicle)
 
-        self.velocity += self.acceleration * dt
-
-        if self.velocity < 0:
-            self.velocity = 0
+        self.acceleration = self._clamp_acceleration(acceleration)
+        self.velocity = max(self.MIN_VELOCITY, self.velocity + self.acceleration * dt)
 
         self.position += self.velocity * dt
 
@@ -81,9 +72,25 @@ class Vehicle:
     def on_signal_change(self, state):
         self.signal_state = state
 
+    def _build_environment(self, lead_vehicle, distance_to_signal):
+        return {
+            "lead": lead_vehicle,
+            "vehicle_position": self.position,
+            "vehicle_velocity": self.velocity,
+            "signal_state": self.signal_state,
+            "distance_to_signal": distance_to_signal,
+            "braking_deceleration": self.DEFAULT_BRAKING_DECELERATION,
+        }
+
+    def _physics_acceleration(self, lead_vehicle):
+        if self.physics_model is None:
+            return self.acceleration
+        return self.physics_model.compute_acceleration(self, lead_vehicle)
+
     def _braking_deceleration(self, environment):
         if hasattr(self.braking_strategy, "braking_deceleration"):
             return self.braking_strategy.braking_deceleration(self, environment)
+        return environment["braking_deceleration"]
 
-        comfortable_braking = getattr(self.physics_model, "comfortable_braking", 2.0)
-        return -abs(comfortable_braking)
+    def _clamp_acceleration(self, acceleration):
+        return max(self.MIN_ACCELERATION, min(self.MAX_ACCELERATION, float(acceleration)))
