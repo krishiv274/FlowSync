@@ -2,64 +2,74 @@
 
 ### Overview
 
-The Strategy Pattern is used to define a family of algorithms, encapsulate each one, and make them interchangeable at runtime. This allows the behavior of an object to be selected dynamically without modifying its code.
+The Strategy Pattern encapsulates interchangeable algorithms behind small interfaces so the caller can switch behavior without changing the owning class.
+
+FlowSync uses this pattern in the vehicle motion pipeline and in lane update handling.
 
 ### Where It Is Used
 
-In this project, the Strategy Pattern is applied to:
+The current strategy points are:
 
-1. **Physics Model (IDM)**
-2. **Braking System**
+1. physics models through `IPhysicsModel`
+2. braking behavior through `IBrakingStrategy`
+3. lane update execution through `UpdateStrategy`
 
 ### Implementation
 
 #### 1. Physics Strategy
 
-An interface `IPhysicsModel` defines the method:
+`IPhysicsModel` defines:
 
-* `computeAcceleration(vehicle, leadVehicle)`
+- `compute_acceleration(vehicle, lead_vehicle)`
 
-Concrete implementation:
+Current concrete implementation:
 
-* `IDMModel` implements the Intelligent Driver Model
+- `IDMModel`
+
+`Vehicle` delegates acceleration calculation to the selected physics model when one is present.
 
 #### 2. Braking Strategy
 
-An interface `IBrakingStrategy` defines:
+`IBrakingStrategy` defines:
 
-* `shouldBrake(vehicle, environment)`
+- `should_brake(vehicle, environment)`
 
-Concrete implementations:
+Current concrete implementation:
 
-* `EmergencyBrake`
-* `SignalBrake`
+- `BrakingSystem`
+
+`Vehicle` asks the braking strategy whether braking should occur before applying the final motion step.
+
+#### 3. Lane Update Strategy
+
+`Lane` can use either:
+
+- the default strategy, which calls `vehicle.update(dt, lead)`
+- a custom strategy or callable update function
+
+This keeps lane behavior open for extension without hard-coding a single update policy.
 
 ### Structure
 
-* `Vehicle` class does NOT implement physics or braking logic directly
-* Instead, it holds references to:
-
-  * `IPhysicsModel`
-  * `IBrakingStrategy`
-
-This allows behavior to be changed dynamically without modifying the `Vehicle` class.
+- `Vehicle` does not implement physics or braking algorithms directly.
+- `Lane` does not hard-code vehicle update behavior.
+- Behavior is selected by composition, not inheritance.
 
 ### Benefits
 
-* **Open/Closed Principle**: New behaviors can be added without modifying existing code
-* **Flexibility**: Different driving behaviors can be assigned to vehicles
-* **Reusability**: Physics and braking logic are decoupled from vehicle logic
-* **Testability**: Each strategy can be tested independently
+- **Open/Closed Principle**: new behaviors can be added without modifying the owning entity.
+- **Flexibility**: different driving models can be swapped in.
+- **Reusability**: the same strategy can be reused across vehicles or lanes.
+- **Testability**: each strategy can be verified independently.
 
 ### Example
 
 ```python
 vehicle.physics_model = IDMModel()
-vehicle.braking_strategy = EmergencyBrake()
+vehicle.braking_strategy = BrakingSystem()
+lane.set_update_strategy(custom_strategy)
 ```
-
-The same vehicle can later switch to a different strategy without code changes.
 
 ### Conclusion
 
-The Strategy Pattern enables modular, extensible, and maintainable design, which is essential for a scalable traffic simulation system.
+FlowSync uses the Strategy Pattern to keep motion behavior modular, extensible, and easy to test.

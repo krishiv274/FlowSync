@@ -1,43 +1,58 @@
 # FlowSync
 
-FlowSync is a Python-based traffic simulation project focused on building a clean, extensible architecture for vehicle behavior, traffic control, and visualization.
+FlowSync is a Python traffic simulation project focused on a clean, extensible architecture for vehicle behavior, traffic control, and visualization.
 
 ## Project Status
 
-This repository now has a working simulation architecture with the core control flow in place.
+The current implementation has a working simulation loop and a clear update order.
 
 Implemented so far:
-- `SimulationController` and `TrafficManager` orchestrate the simulation loop
-- Roads, intersections, lanes, and traffic signals are integrated into the update flow
-- Vehicles use physics and braking models for motion decisions
-- Tests cover the simulation flow, road network, signals, intersections, and edge cases
+
+- `SimulationController` runs the outer loop.
+- `TrafficManager` orchestrates intersections, roads, and entity setup.
+- `TrafficSignal` notifies vehicles through the observer flow.
+- `Vehicle` uses physics and braking strategies for motion decisions.
+- `Lane` maintains deterministic lead-vehicle ordering.
 
 Current focus:
-- Refining lane, road, and intersection behavior
-- Expanding vehicle dynamics and signal-aware responses
-- Hardening the simulation with additional edge and stress coverage
+
+- refining road-network behavior and edge cases
+- expanding vehicle dynamics and signal-aware responses
+- keeping the documentation aligned with the implementation
 
 ## Goals
 
 - Build a modular traffic simulation foundation using clear separation of concerns
-- Keep domain components extensible for future models (IDM, lane changing, adaptive control)
+- Keep domain components extensible for future models and traffic policies
 - Support experimentation for traffic engineering and autonomous systems scenarios
 
 ## High-Level Architecture
 
 ```mermaid
 flowchart TD
-    A[SimulationController] --> B[TrafficManager]
-    B --> C[Road]
-    B --> D[Intersection]
-    C --> E[Lane]
-    D --> F[TrafficSignal]
-    E <--> F
-    E --> G[Vehicle]
-    G --> H[Physics + Braking]
+    User[User / main.py] --> SC[SimulationController]
+    SC --> TM[TrafficManager]
+    SC --> R[Renderer]
+
+    TM --> I[Intersection]
+    TM --> RO[Road]
+    RO --> L[Lane]
+    I --> TS[TrafficSignal]
+    L --> V[Vehicle]
+
+    TS -->|notify| V
+    V --> PM[Physics Model]
+    V --> BS[Braking Strategy]
+    TM --> VF[VehicleFactory]
 ```
 
-This is the current control and data flow used by the simulation, with the controller and manager coordinating updates across the road network and vehicle dynamics.
+The simulation updates in this order:
+
+1. intersections and signals update first
+2. roads and lanes update second
+3. vehicles react to the latest signal state and lead vehicle information
+
+For a fuller explanation of the design choices, see [docs/Architecture_Report.md](docs/Architecture_Report.md).
 
 ## Repository Structure
 

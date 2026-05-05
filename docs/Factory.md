@@ -1,92 +1,86 @@
-# Factory Pattern – Traffic Simulation System
+# Factory Pattern - Traffic Simulation System
 
 ## Overview
 
-The Factory Pattern is a creational design pattern that provides an interface for creating objects without specifying their exact class.
+The Factory Pattern centralizes object creation so the rest of the codebase does not need to know the exact construction details of each product.
 
-It centralizes object creation logic and promotes flexibility and scalability.
-
----
+In FlowSync, this pattern is used to create vehicles in one place and to keep initialization concerns out of the simulation loop.
 
 ## Where It Is Used
 
-In this project, the Factory Pattern is used for:
+The current factory usage is in:
 
-* **Vehicle creation**
+- `VehicleFactory.create_vehicle(vehicle_type)`
 
----
+## What Problem It Solves
 
-## Problem It Solves
+Without a factory, simulation code would need to know how to:
 
-Different types of vehicles (Car, Truck, Bike) need to be created with:
+- instantiate the correct vehicle class
+- assign a unique id
+- attach the default physics model
+- keep creation logic consistent across spawn points
 
-* Different properties
-* Different physics parameters
-* Different behaviors
-
-Without a factory:
-
-* Object creation logic would be scattered
-* Code would become difficult to maintain
-
----
+That would spread construction logic across the core simulation flow.
 
 ## Implementation
 
-### Factory Class: VehicleFactory
+### Factory Class: `VehicleFactory`
 
-Responsible for:
+`VehicleFactory` currently acts as the creation point for simulation vehicles.
 
-* Creating vehicle instances based on type
-* Assigning appropriate configurations
+It does the following:
+
+- normalizes the requested vehicle type
+- looks up the constructor in `VehicleFactory.registry`
+- creates a `Vehicle`
+- attaches `IDMModel` as the default physics model
+- assigns a unique id
 
 ```python
 class VehicleFactory:
-    def createVehicle(self, type):
-        if type == "car":
-            return Car()
-        elif type == "truck":
-            return Truck()
-        elif type == "bike":
-            return Bike()
+    registry = {
+        "car": Vehicle,
+    }
+
+    @staticmethod
+    def create_vehicle(vehicle_type):
+        ...
 ```
 
----
+### Product
 
-### Product Classes
+The current concrete product is:
 
-* `Vehicle` (base class)
-* `Car`, `Truck`, `Bike` (derived classes)
+- `Vehicle`
 
----
+The factory is already structured so additional vehicle classes can be added later by extending the registry.
 
 ## Interaction Flow
 
-1. Simulation requests a new vehicle
-2. Calls `VehicleFactory.createVehicle(type)`
-3. Factory instantiates correct subclass
-4. Returns fully initialized object
-
----
+1. `TrafficManager` requests a new vehicle.
+2. `VehicleFactory.create_vehicle("car")` is called.
+3. The factory resolves the registered class.
+4. A `Vehicle` instance is returned with default behavior attached.
+5. `TrafficManager` configures lane position and signal observers.
 
 ## Benefits
 
-* **Encapsulation**: Object creation logic is centralized
-* **Scalability**: New vehicle types can be added easily
-* **Maintainability**: Reduces duplication
-* **Flexibility**: Client code is independent of concrete classes
+- **Encapsulation**: creation details stay in one place.
+- **Consistency**: every spawned vehicle gets the same default setup.
+- **Extensibility**: new vehicle types can be added by extending the registry.
+- **Testability**: construction is easy to mock or replace.
 
----
+## Relationship to SOLID
+
+This factory supports Open/Closed Principle by allowing new vehicle types to be added without changing the main simulation code.
 
 ## Example
 
 ```python
-factory = VehicleFactory()
-vehicle = factory.createVehicle("car")
+vehicle = VehicleFactory.create_vehicle("car")
 ```
-
----
 
 ## Conclusion
 
-The Factory Pattern simplifies object creation and ensures that the system remains extensible and maintainable as new vehicle types are introduced.
+FlowSync uses the Factory Pattern to keep vehicle creation centralized, predictable, and easy to extend as the simulation grows.
