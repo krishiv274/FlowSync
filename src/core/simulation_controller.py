@@ -38,16 +38,27 @@ class SimulationController:
             self.max_steps = steps
         
         self._print_simulation_start()
-        
-        while self.running:
-            self.current_step += 1
-            self.update(self.dt)
-            
-            if self.max_steps is not None and self.current_step >= self.max_steps:
-                self.running = False
-            
-            time.sleep(self.dt)  # Control CPU usage
-        
+
+        try:
+            while self.running:
+                if self.renderer is not None and not self.renderer.handle_events():
+                    self.running = False
+                    break
+
+                self.current_step += 1
+                self.update(self.dt)
+
+                if self.max_steps is not None and self.current_step >= self.max_steps:
+                    self.running = False
+
+                if self.renderer is not None:
+                    self.renderer.update()
+
+                time.sleep(self.dt)  # Control CPU usage
+        finally:
+            if self.renderer is not None:
+                self.renderer.shutdown()
+
         self._print_simulation_end()
 
     def update(self, dt):

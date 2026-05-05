@@ -9,7 +9,7 @@ def main():
     # - dt (time step): 0.1 seconds per frame
     # - max_steps: 20 steps for standard validation
     # - debug: False (set to True to enable debug logging)
-    sim = SimulationController(dt=0.1, max_steps=20, debug=False)
+    sim = SimulationController(dt=0.1, max_steps=None, debug=False)
     
     # Run simulation
     sim.run()
