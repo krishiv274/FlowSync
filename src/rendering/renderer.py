@@ -85,6 +85,8 @@ class Renderer:
         self.edge_color = (30, 34, 42)
         self.vehicle_color = (70, 150, 255)
         self.stopped_vehicle_color = (245, 124, 0)
+        self.braking_vehicle_color = (220, 90, 90)
+        self.road_marking_color = (200, 200, 210)
         self.signal_outline_color = (18, 18, 18)
         self.overlay_color = (240, 242, 246)
         self.keys_pressed = set()
@@ -258,6 +260,33 @@ class Renderer:
             self.pygame.draw.rect(self.screen, self.edge_color, road_rect, border_radius=8)
             self.pygame.draw.rect(self.screen, self.road_color, road_rect, 0, border_radius=8)
 
+            # Draw road end markers
+            end_x, end_y0 = self.camera.world_to_screen(road_end_x, road_world_y - 5)
+            _, end_y1 = self.camera.world_to_screen(road_end_x, road_world_y + lane_count * lane_height + 5)
+            if -100 < end_x < self.width + 100:
+                self.pygame.draw.line(
+                    self.screen,
+                    self.road_marking_color,
+                    (int(end_x), int(end_y0)),
+                    (int(end_x), int(end_y1)),
+                    2,
+                )
+
+            # Draw direction arrows
+            arrow_spacing = max(120.0, road_length / 5)
+            arrow_x = road_world_x + arrow_spacing
+            while arrow_x < road_end_x - 40:
+                for lane_index in range(lane_count):
+                    lane_center_y = road_world_y + lane_index * lane_height + lane_height / 2
+                    ax, ay = self.camera.world_to_screen(arrow_x, lane_center_y)
+                    tip_x, tip_y = self.camera.world_to_screen(arrow_x + 16, lane_center_y)
+                    wing_up_x, wing_up_y = self.camera.world_to_screen(arrow_x + 10, lane_center_y - 6)
+                    wing_dn_x, wing_dn_y = self.camera.world_to_screen(arrow_x + 10, lane_center_y + 6)
+                    self.pygame.draw.line(self.screen, self.road_marking_color, (int(ax), int(ay)), (int(tip_x), int(tip_y)), 2)
+                    self.pygame.draw.line(self.screen, self.road_marking_color, (int(tip_x), int(tip_y)), (int(wing_up_x), int(wing_up_y)), 2)
+                    self.pygame.draw.line(self.screen, self.road_marking_color, (int(tip_x), int(tip_y)), (int(wing_dn_x), int(wing_dn_y)), 2)
+                arrow_x += arrow_spacing
+
             # Draw lane separators and labels
             for lane_index, lane in enumerate(lanes):
                 lane_world_y = road_world_y + lane_index * lane_height
@@ -267,7 +296,13 @@ class Renderer:
                 if lane_index > 0:
                     x0_s, y_sep = self.camera.world_to_screen(road_world_x, lane_world_y)
                     x1_s, _ = self.camera.world_to_screen(road_end_x, lane_world_y)
-                    self.pygame.draw.line(self.screen, self.lane_color, (int(x0_s), int(y_sep)), (int(x1_s), int(y_sep)), 1)
+                    self._draw_dashed_line(
+                        (int(x0_s), int(y_sep)),
+                        (int(x1_s), int(y_sep)),
+                        self.lane_color,
+                        dash_length=12,
+                        gap_length=8,
+                    )
 
                 # Draw lane label
                 label_x, label_y = self.camera.world_to_screen(road_world_x + 20, lane_world_y + lane_height / 2)
@@ -281,6 +316,24 @@ class Renderer:
     def _rect_on_screen(self, x0, y0, x1, y1):
         """Check if a rectangle is at least partially on screen."""
         return (x0 < self.width and x1 > 0 and y0 < self.height and y1 > 0)
+
+    def _draw_dashed_line(self, start, end, color, dash_length=10, gap_length=6):
+        """Draw a dashed line between two points."""
+        x0, y0 = start
+        x1, y1 = end
+        total_length = max(1, ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5)
+        dx = (x1 - x0) / total_length
+        dy = (y1 - y0) / total_length
+        dist = 0
+        while dist < total_length:
+            seg_start = dist
+            seg_end = min(dist + dash_length, total_length)
+            sx = x0 + dx * seg_start
+            sy = y0 + dy * seg_start
+            ex = x0 + dx * seg_end
+            ey = y0 + dy * seg_end
+            self.pygame.draw.line(self.screen, color, (int(sx), int(sy)), (int(ex), int(ey)), 1)
+            dist += dash_length + gap_length
 
     def _draw_vehicles(self, roads, vehicles):
         """Draw vehicles using camera-transformed world coordinates."""
@@ -313,6 +366,7 @@ class Renderer:
             road_length = getattr(lane, "length", 1000.0)
             position = float(getattr(vehicle, "position", 0.0))
             velocity = float(getattr(vehicle, "velocity", 0.0))
+            acceleration = float(getattr(vehicle, "acceleration", 0.0))
 
             # Convert to world coordinates
             world_x = position
@@ -324,11 +378,32 @@ class Renderer:
                 continue
 
             # Draw vehicle
-            vehicle_color = self.vehicle_color if velocity > 0.5 else self.stopped_vehicle_color
-            rect = self.pygame.Rect(0, 0, 24, 14)
+            if acceleration < -0.2:
+                vehicle_color = self.braking_vehicle_color
+            elif velocity > 0.5:
+                vehicle_color = self.vehicle_color
+            else:
+                vehicle_color = self.stopped_vehicle_color
+
+            rect = self.pygame.Rect(0, 0, 26, 14)
             rect.center = (int(screen_x), int(screen_y))
             self.pygame.draw.rect(self.screen, vehicle_color, rect, border_radius=3)
             self.pygame.draw.rect(self.screen, (18, 18, 18), rect, 1, border_radius=3)
+
+            # Draw brake lights when decelerating
+            if acceleration < -0.2:
+                brake_left = self.pygame.Rect(rect.left + 2, rect.top + 2, 4, 4)
+                brake_right = self.pygame.Rect(rect.left + 2, rect.bottom - 6, 4, 4)
+                self.pygame.draw.rect(self.screen, (255, 80, 80), brake_left, border_radius=2)
+                self.pygame.draw.rect(self.screen, (255, 80, 80), brake_right, border_radius=2)
+
+            # Draw movement cue
+            if velocity > 0.5:
+                arrow_tip = (rect.right + 6, rect.centery)
+                arrow_tail = (rect.right, rect.centery)
+                self.pygame.draw.line(self.screen, self.road_marking_color, arrow_tail, arrow_tip, 2)
+                self.pygame.draw.line(self.screen, self.road_marking_color, arrow_tip, (rect.right + 2, rect.centery - 3), 2)
+                self.pygame.draw.line(self.screen, self.road_marking_color, arrow_tip, (rect.right + 2, rect.centery + 3), 2)
 
             # Draw vehicle label
             v_id = getattr(vehicle, "id", "V")
@@ -367,6 +442,17 @@ class Renderer:
             light_center = body.center
             self.pygame.draw.circle(self.screen, color, light_center, 6)
             self.pygame.draw.circle(self.screen, (255, 255, 255), light_center, 6, 1)
+
+            # Draw stop line across the lane
+            stop_left_x, stop_left_y = self.camera.world_to_screen(world_x - 4, world_y - 18)
+            stop_right_x, stop_right_y = self.camera.world_to_screen(world_x - 4, world_y + 18)
+            self.pygame.draw.line(
+                self.screen,
+                self.road_marking_color,
+                (int(stop_left_x), int(stop_left_y)),
+                (int(stop_right_x), int(stop_right_y)),
+                3,
+            )
 
             # Draw signal label
             sig_id = getattr(signal, "id", "?")
