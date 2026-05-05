@@ -1,100 +1,148 @@
-"""Renderer for traffic simulation visualization."""
+"""MovSim-style pygame renderer for the FlowSync traffic simulation.
+
+The renderer is intentionally a read-only visualization layer. It builds a
+screen layout from public road, lane, vehicle, and signal state without
+mutating simulation objects or making driving decisions.
+"""
+
+from __future__ import annotations
+
+import math
+import time
+from dataclasses import dataclass
+from typing import Any, Iterable
+
+
+@dataclass(frozen=True)
+class LaneView:
+    lane: Any
+    index: int
+    centerline: tuple[float, float, float, float]
+    orientation: str
+    direction: int
+    road_id: Any
+    length: float
+
+
+@dataclass(frozen=True)
+class RoadView:
+    road: Any
+    index: int
+    rect: tuple[float, float, float, float]
+    orientation: str
+    lanes: tuple[LaneView, ...]
+    length: float
 
 
 class Camera:
-    """Manages viewport transformations (pan, zoom, centering)."""
+    """World-to-screen transform with offset and scalable zoom."""
 
-    def __init__(self, width=1200, height=800):
-        """Initialize camera with default framing."""
+    def __init__(self, width: int, height: int, scale: float = 1.0) -> None:
         self.width = width
         self.height = height
-        self.offset_x = 0.0
-        self.offset_y = 0.0
-        self.zoom = 1.0
-        self.min_zoom = 0.5
-        self.max_zoom = 3.0
+        self.offset = [0.0, 0.0]
+        self.scale = scale
+        self.min_scale = 0.35
+        self.max_scale = 3.0
 
-    def world_to_screen(self, world_x, world_y):
-        """Convert world coordinates to screen coordinates."""
-        screen_x = (world_x - self.offset_x) * self.zoom + self.width / 2
-        screen_y = (world_y - self.offset_y) * self.zoom + self.height / 2
-        return (screen_x, screen_y)
+    def world_to_screen(self, x: float, y: float) -> tuple[int, int]:
+        sx = (x - self.offset[0]) * self.scale + self.width * 0.5
+        sy = (y - self.offset[1]) * self.scale + self.height * 0.5
+        return int(round(sx)), int(round(sy))
 
-    def screen_to_world(self, screen_x, screen_y):
-        """Convert screen coordinates to world coordinates."""
-        world_x = (screen_x - self.width / 2) / self.zoom + self.offset_x
-        world_y = (screen_y - self.height / 2) / self.zoom + self.offset_y
-        return (world_x, world_y)
+    def world_rect_to_screen(self, rect: tuple[float, float, float, float]) -> tuple[int, int, int, int]:
+        x, y, w, h = rect
+        x0, y0 = self.world_to_screen(x, y)
+        x1, y1 = self.world_to_screen(x + w, y + h)
+        left = min(x0, x1)
+        top = min(y0, y1)
+        return left, top, abs(x1 - x0), abs(y1 - y0)
 
-    def pan(self, dx, dy):
-        """Pan the camera by (dx, dy) in world units."""
-        self.offset_x += dx / self.zoom
-        self.offset_y += dy / self.zoom
+    def pan(self, dx: float, dy: float) -> None:
+        self.offset[0] += dx / max(self.scale, 0.001)
+        self.offset[1] += dy / max(self.scale, 0.001)
 
-    def zoom_in(self, factor=1.2):
-        """Zoom in by the given factor."""
-        self.zoom = min(self.zoom * factor, self.max_zoom)
+    def zoom(self, factor: float) -> None:
+        self.scale = max(self.min_scale, min(self.max_scale, self.scale * factor))
 
-    def zoom_out(self, factor=1.2):
-        """Zoom out by the given factor."""
-        self.zoom = max(self.zoom / factor, self.min_zoom)
-
-    def reset(self):
-        """Reset camera to default state."""
-        self.offset_x = 0.0
-        self.offset_y = 0.0
-        self.zoom = 1.0
-
-    def fit_bounds(self, min_x, min_y, max_x, max_y, padding=50):
-        """Adjust zoom and pan to fit the given world bounds on screen."""
-        world_width = max_x - min_x
-        world_height = max_y - min_y
-        
-        if world_width <= 0 or world_height <= 0:
-            self.reset()
-            return
-        
-        zoom_x = (self.width - 2 * padding) / world_width
-        zoom_y = (self.height - 2 * padding) / world_height
-        self.zoom = min(zoom_x, zoom_y, self.max_zoom)
-        self.offset_x = min_x + world_width / 2
-        self.offset_y = min_y + world_height / 2
+    def fit_bounds(self, bounds: tuple[float, float, float, float], padding: float = 80.0) -> None:
+        min_x, min_y, max_x, max_y = bounds
+        span_x = max(1.0, max_x - min_x)
+        span_y = max(1.0, max_y - min_y)
+        usable_w = max(1.0, self.width - padding * 2.0)
+        usable_h = max(1.0, self.height - padding * 2.0)
+        self.scale = max(self.min_scale, min(self.max_scale, min(usable_w / span_x, usable_h / span_y)))
+        self.offset = [min_x + span_x * 0.5, min_y + span_y * 0.5]
 
 
 class Renderer:
-    """Handles rendering of simulation entities."""
+    """Render roads, lanes, intersections, signals, vehicles, and light UI."""
 
-    def __init__(self, width=1200, height=800, title="FlowSync"):
-        """Initialize the renderer and try to create a pygame window."""
+    def __init__(
+        self,
+        traffic_manager: Any | None = None,
+        width: int = 1200,
+        height: int = 800,
+        title: str = "FlowSync Traffic Simulation",
+    ) -> None:
+        self.traffic_manager = traffic_manager
         self.width = width
         self.height = height
         self.title = title
-        self.frame_count = 0
-        self.initialized = False
-        self.console_fallback = False
+
         self.pygame = None
         self.screen = None
         self.clock = None
         self.font = None
         self.small_font = None
-        self.camera = Camera(width, height)
-        self.pan_speed = 20.0
-        self.background_color = (20, 24, 32)
-        self.road_color = (52, 58, 68)
-        self.lane_color = (120, 126, 138)
-        self.edge_color = (30, 34, 42)
-        self.vehicle_color = (70, 150, 255)
-        self.stopped_vehicle_color = (245, 124, 0)
-        self.braking_vehicle_color = (220, 90, 90)
-        self.road_marking_color = (200, 200, 210)
-        self.signal_outline_color = (18, 18, 18)
-        self.overlay_color = (240, 242, 246)
-        self.keys_pressed = set()
-        self._should_refit_scene = False
+        self.initialized = False
+        self.console_fallback = False
+
+        self.camera = Camera(width, height, scale=1.0)
+        self.frame_count = 0
+        self.running = True
+        self.paused = False
+        self.reset_requested = False
+        self.keys_down: set[int] = set()
+
+        self.lane_width = 34.0
+        self.road_margin = 12.0
+        self.world_padding = 130.0
+        self.vehicle_size = (25.0, 13.0)
+        self._layout: tuple[RoadView, ...] = ()
+        self._lane_lookup: dict[int, LaneView] = {}
+        self._track_cache: dict[int, dict[str, Any]] = {}
+        self._last_layout_signature: tuple[Any, ...] | None = None
+        self._last_frame_time = time.monotonic()
+        self._needs_fit = True
+
+        self.colors = {
+            "background": (18, 21, 24),
+            "grass": (29, 44, 38),
+            "asphalt": (46, 50, 54),
+            "asphalt_dark": (31, 34, 37),
+            "edge": (118, 125, 124),
+            "lane": (225, 229, 225),
+            "lane_dim": (153, 160, 157),
+            "intersection": (55, 58, 61),
+            "priority": (74, 79, 82),
+            "vehicle": (54, 149, 224),
+            "vehicle_alt": (238, 169, 69),
+            "brake": (230, 72, 72),
+            "stopped": (214, 92, 78),
+            "text": (232, 235, 232),
+            "muted": (162, 169, 166),
+            "signal_body": (21, 23, 24),
+            "red": (230, 64, 61),
+            "yellow": (245, 197, 66),
+            "green": (74, 190, 105),
+            "off": (67, 70, 72),
+        }
+
         self.initialize()
 
-    def initialize(self):
-        """Initialize pygame resources if possible."""
+    def initialize(self) -> None:
+        """Initialize pygame resources, falling back to console-safe mode."""
         if self.initialized or self.console_fallback:
             return
 
@@ -103,406 +151,569 @@ class Renderer:
 
             pygame.init()
             self.pygame = pygame
-            self.screen = pygame.display.set_mode((self.width, self.height))
+            self.screen = pygame.display.set_mode((self.width, self.height), pygame.RESIZABLE)
             pygame.display.set_caption(self.title)
             self.clock = pygame.time.Clock()
-            self.font = pygame.font.SysFont("Arial", 18)
-            self.small_font = pygame.font.SysFont("Arial", 14)
+            self.font = pygame.font.SysFont("Arial", 17)
+            self.small_font = pygame.font.SysFont("Arial", 13)
             self.initialized = True
         except Exception:
             self.console_fallback = True
-            self.pygame = None
-            self.screen = None
-            self.clock = None
-            self.font = None
-            self.small_font = None
 
-    def handle_events(self):
-        """Process window events and return False when the app should exit."""
+    def handle_events(self) -> bool:
+        """Process renderer controls. Returns False when the window should quit."""
         if not self.initialized or self.pygame is None:
             return True
 
         for event in self.pygame.event.get():
             if event.type == self.pygame.QUIT:
+                self.running = False
                 return False
+
             if event.type == self.pygame.KEYDOWN:
+                self.keys_down.add(event.key)
                 if event.key == self.pygame.K_ESCAPE:
+                    self.running = False
                     return False
-                self.keys_pressed.add(event.key)
-                if event.key == self.pygame.K_EQUALS or event.key == self.pygame.K_PLUS:
-                    self.camera.zoom_in(1.2)
+                if event.key == self.pygame.K_SPACE:
+                    self.paused = not self.paused
+                if event.key == self.pygame.K_r:
+                    self.reset_requested = True
+                    self._track_cache.clear()
+                    self._needs_fit = True
+                if event.key in (self.pygame.K_EQUALS, self.pygame.K_PLUS):
+                    self.camera.zoom(1.12)
                 if event.key == self.pygame.K_MINUS:
-                    self.camera.zoom_out(1.2)
-                if event.key == self.pygame.K_c:
-                    self.camera.reset()
-                    self._should_refit_scene = True
+                    self.camera.zoom(1 / 1.12)
+                if event.key == self.pygame.K_0:
+                    self._needs_fit = True
+
             if event.type == self.pygame.KEYUP:
-                self.keys_pressed.discard(event.key)
+                self.keys_down.discard(event.key)
+
             if event.type == self.pygame.VIDEORESIZE:
-                self.width = max(640, event.w)
-                self.height = max(480, event.h)
+                self.width = max(720, int(event.w))
+                self.height = max(480, int(event.h))
                 self.camera.width = self.width
                 self.camera.height = self.height
-                self.screen = self.pygame.display.set_mode(
-                    (self.width, self.height),
-                    self.pygame.RESIZABLE,
-                )
-            if event.type == self.pygame.MOUSEWHEEL:
-                if event.y > 0:
-                    self.camera.zoom_in(1.15)
-                elif event.y < 0:
-                    self.camera.zoom_out(1.15)
+                self.screen = self.pygame.display.set_mode((self.width, self.height), self.pygame.RESIZABLE)
+                self._needs_fit = True
 
-        self._handle_continuous_pan()
+            if event.type == self.pygame.MOUSEWHEEL:
+                self.camera.zoom(1.1 if event.y > 0 else 1 / 1.1)
+
+        pan = 18.0
+        if self.pygame.K_LEFT in self.keys_down or self.pygame.K_a in self.keys_down:
+            self.camera.pan(-pan, 0)
+        if self.pygame.K_RIGHT in self.keys_down or self.pygame.K_d in self.keys_down:
+            self.camera.pan(pan, 0)
+        if self.pygame.K_UP in self.keys_down or self.pygame.K_w in self.keys_down:
+            self.camera.pan(0, -pan)
+        if self.pygame.K_DOWN in self.keys_down or self.pygame.K_s in self.keys_down:
+            self.camera.pan(0, pan)
+
         return True
 
-    def update(self):
-        """Advance renderer timing and maintain a steady frame rate."""
-        if self.initialized and self.clock is not None:
-            self.clock.tick(60)
+    def update(self) -> None:
+        """Compatibility hook for the existing controller."""
+        return None
 
-    def _handle_continuous_pan(self):
-        """Handle continuous panning based on held-down arrow keys."""
-        if not self.pygame:
-            return
-        
-        if self.pygame.K_LEFT in self.keys_pressed or self.pygame.K_a in self.keys_pressed:
-            self.camera.pan(-self.pan_speed / self.camera.zoom, 0)
-        if self.pygame.K_RIGHT in self.keys_pressed or self.pygame.K_d in self.keys_pressed:
-            self.camera.pan(self.pan_speed / self.camera.zoom, 0)
-        if self.pygame.K_UP in self.keys_pressed or self.pygame.K_w in self.keys_pressed:
-            self.camera.pan(0, -self.pan_speed / self.camera.zoom)
-        if self.pygame.K_DOWN in self.keys_pressed or self.pygame.K_s in self.keys_pressed:
-            self.camera.pan(0, self.pan_speed / self.camera.zoom)
+    def draw(
+        self,
+        roads: Iterable[Any] | None = None,
+        vehicles: Iterable[Any] | None = None,
+        signals: Iterable[Any] | None = None,
+    ) -> None:
+        """Draw one frame using passed collections or the stored traffic manager."""
+        if not self.initialized and not self.console_fallback:
+            self.initialize()
 
-    def draw(self, roads, vehicles, signals):
-        """Draw the traffic simulation."""
+        roads, vehicles, signals = self._resolve_state(roads, vehicles, signals)
+        self._update_layout(roads, signals)
         self.frame_count += 1
 
         if self.console_fallback or self.pygame is None:
             self._draw_console(roads, vehicles, signals)
             return
 
-        if not self.initialized:
-            self.initialize()
-            if self.console_fallback or self.pygame is None:
-                self._draw_console(roads, vehicles, signals)
-                return
-
-        # Auto-fit camera on first real frame
-        if self.frame_count == 1:
-            self._auto_fit_scene(roads)
-
-        self.screen.fill(self.background_color)
-        self._draw_roads(roads)
-        self._draw_signals(signals)
-        self._draw_vehicles(roads, vehicles)
-        self._draw_overlay(roads, vehicles, signals)
+        self.handle_events()
+        self.clear()
+        self.draw_roads()
+        self.draw_lanes()
+        self.draw_intersections()
+        self.draw_signals(signals)
+        self.draw_vehicles(vehicles)
+        self._draw_hud(len(roads), len(vehicles), len(signals))
         self.pygame.display.flip()
+        if self.clock is not None:
+            self.clock.tick(60)
 
-        # Re-fit scene on demand
-        if self._should_refit_scene:
-            self._auto_fit_scene(roads)
-            self._should_refit_scene = False
+    def clear(self) -> None:
+        self.screen.fill(self.colors["background"])
 
-    def shutdown(self):
-        """Release pygame resources."""
+    def draw_roads(self) -> None:
+        for view in self._layout:
+            rect = self.pygame.Rect(self.camera.world_rect_to_screen(view.rect))
+            if not self._rect_visible(rect, margin=80):
+                continue
+            self.pygame.draw.rect(self.screen, self.colors["edge"], rect.inflate(8, 8), border_radius=4)
+            self.pygame.draw.rect(self.screen, self.colors["asphalt"], rect, border_radius=3)
+
+    def draw_lanes(self) -> None:
+        for view in self._layout:
+            for lane_view in view.lanes:
+                x0, y0, x1, y1 = lane_view.centerline
+                start = self.camera.world_to_screen(x0, y0)
+                end = self.camera.world_to_screen(x1, y1)
+                self._draw_lane_edge_ticks(lane_view)
+                if lane_view.index > 0:
+                    self._draw_dashed_line(start, end, self.colors["lane"], dash=18, gap=16, width=2)
+                self._draw_direction_arrow(lane_view)
+
+    def draw_intersections(self) -> None:
+        if not self._layout:
+            return
+
+        for cx, cy, size in self._intersection_zones():
+            rect = self._world_rect_center(cx, cy, size, size)
+            screen_rect = self.pygame.Rect(self.camera.world_rect_to_screen(rect))
+            self.pygame.draw.rect(self.screen, self.colors["intersection"], screen_rect, border_radius=2)
+
+            priority = self.pygame.Rect(self.camera.world_rect_to_screen(self._world_rect_center(cx, cy, size * 0.42, size * 0.42)))
+            self.pygame.draw.rect(self.screen, self.colors["priority"], priority, width=2, border_radius=2)
+
+            x0, y0 = self.camera.world_to_screen(cx - size * 0.5, cy - size * 0.5)
+            x1, y1 = self.camera.world_to_screen(cx + size * 0.5, cy + size * 0.5)
+            self.pygame.draw.line(self.screen, self.colors["lane_dim"], (x0, y0), (x1, y1), 1)
+            self.pygame.draw.line(self.screen, self.colors["lane_dim"], (x0, y1), (x1, y0), 1)
+
+    def draw_vehicles(self, vehicles: Iterable[Any] | None = None) -> None:
+        vehicles = list(vehicles if vehicles is not None else self._resolve_state()[1])
+        now = time.monotonic()
+        dt = max(0.001, min(0.1, now - self._last_frame_time))
+        self._last_frame_time = now
+        smoothing = 1.0 if self.paused else min(1.0, dt * 14.0)
+        visible_ids = set()
+
+        for vehicle in vehicles:
+            lane_view = self._lane_lookup.get(id(getattr(vehicle, "lane", None)))
+            if lane_view is None:
+                continue
+
+            target = self._vehicle_world_position(vehicle, lane_view)
+            vehicle_id = id(vehicle)
+            visible_ids.add(vehicle_id)
+            track = self._track_cache.setdefault(vehicle_id, {"pos": target, "color_index": vehicle_id % 5})
+            old_x, old_y = track["pos"]
+            draw_x = old_x + (target[0] - old_x) * smoothing
+            draw_y = old_y + (target[1] - old_y) * smoothing
+            track["pos"] = (draw_x, draw_y)
+
+            sx, sy = self.camera.world_to_screen(draw_x, draw_y)
+            if sx < -80 or sx > self.width + 80 or sy < -80 or sy > self.height + 80:
+                continue
+
+            color = self._vehicle_color(vehicle, int(track["color_index"]))
+            angle = 0 if lane_view.orientation == "horizontal" else -90
+            if lane_view.direction < 0:
+                angle += 180
+            self._draw_vehicle_body((sx, sy), angle, color, vehicle)
+
+        for cached_id in list(self._track_cache):
+            if cached_id not in visible_ids:
+                del self._track_cache[cached_id]
+
+    def draw_signals(self, signals: Iterable[Any] | None = None) -> None:
+        signals = list(signals if signals is not None else self._resolve_state()[2])
+        for signal in signals:
+            position = self._signal_world_position(signal)
+            if position is None:
+                continue
+            sx, sy = self.camera.world_to_screen(*position)
+            if sx < -70 or sx > self.width + 70 or sy < -70 or sy > self.height + 70:
+                continue
+
+            state = str(getattr(signal, "state", "RED")).upper()
+            radius = max(4, int(6 * self.camera.scale))
+            spacing = radius * 2 + 4
+            body = self.pygame.Rect(0, 0, radius * 3, spacing * 3 + 8)
+            body.center = (sx, sy)
+            self.pygame.draw.rect(self.screen, self.colors["signal_body"], body, border_radius=5)
+
+            light_order = ("RED", "YELLOW", "GREEN")
+            for index, light in enumerate(light_order):
+                cx = body.centerx
+                cy = body.top + spacing // 2 + 5 + index * spacing
+                color = self._signal_color(light) if light == state else self.colors["off"]
+                self.pygame.draw.circle(self.screen, color, (cx, cy), radius)
+                self.pygame.draw.circle(self.screen, (8, 9, 9), (cx, cy), radius, 1)
+
+            self._draw_stop_line(position)
+
+    def shutdown(self) -> None:
         if self.pygame is not None:
-            try:
-                self.pygame.quit()
-            except Exception:
-                pass
+            self.pygame.quit()
         self.initialized = False
 
-    def _draw_console(self, roads, vehicles, signals):
-        print(f"\n--- Frame {self.frame_count} ---")
-        print(f"Roads: {len(roads)}")
-        print("Vehicles:")
-        for vehicle in vehicles:
-            pos = getattr(vehicle, "position", None)
-            vel = getattr(vehicle, "velocity", None)
-            print(f"  Vehicle id={getattr(vehicle, 'id', id(vehicle))} pos={pos} vel={vel}")
-        print("Signals:")
-        for signal in signals:
-            state = getattr(signal, "state", None)
-            print(f"  Signal id={getattr(signal, 'id', id(signal))} state={state}")
+    def _resolve_state(
+        self,
+        roads: Iterable[Any] | None = None,
+        vehicles: Iterable[Any] | None = None,
+        signals: Iterable[Any] | None = None,
+    ) -> tuple[list[Any], list[Any], list[Any]]:
+        manager = self.traffic_manager
+        if roads is None and manager is not None:
+            getter = getattr(manager, "get_roads", None)
+            roads = getter() if callable(getter) else getattr(manager, "roads", [])
+        if vehicles is None and manager is not None:
+            getter = getattr(manager, "get_vehicles", None)
+            vehicles = getter() if callable(getter) else getattr(manager, "vehicles", [])
+        if signals is None and manager is not None:
+            getter = getattr(manager, "get_signals", None)
+            signals = getter() if callable(getter) else getattr(manager, "signals", [])
 
-    def _draw_roads(self, roads):
-        """Draw roads with lanes using camera-transformed world coordinates."""
-        lane_height = 40.0
-        road_spacing = 150.0
-        x_start = 0.0
-        y_start = 0.0
+        return list(roads or []), list(vehicles or []), list(signals or [])
+
+    def _update_layout(self, roads: list[Any], signals: list[Any]) -> None:
+        signature = tuple(
+            (
+                id(road),
+                getattr(road, "id", None),
+                float(getattr(road, "length", 1000.0) or 1000.0),
+                tuple(id(lane) for lane in getattr(road, "lanes", []) or []),
+            )
+            for road in roads
+        )
+        if signature == self._last_layout_signature:
+            if self._needs_fit and self._layout:
+                self.camera.fit_bounds(self._scene_bounds(), padding=90.0)
+                self._needs_fit = False
+            return
+
+        self._last_layout_signature = signature
+        self._layout = tuple(self._build_layout(roads, signals))
+        self._lane_lookup = {
+            id(lane_view.lane): lane_view
+            for road_view in self._layout
+            for lane_view in road_view.lanes
+            if lane_view.lane is not None
+        }
+        self._needs_fit = True
+        if self._layout:
+            self.camera.fit_bounds(self._scene_bounds(), padding=90.0)
+            self._needs_fit = False
+
+    def _build_layout(self, roads: list[Any], signals: list[Any]) -> list[RoadView]:
+        if not roads:
+            return []
+
+        max_length = max(float(getattr(road, "length", 1000.0) or 1000.0) for road in roads)
+        signal_x = self._primary_signal_x(signals, default=max_length * 0.55)
+        horizontal_y = 0.0
+        vertical_x = signal_x
+        road_views: list[RoadView] = []
+        horizontal_count = 0
+        vertical_count = 0
 
         for road_index, road in enumerate(roads):
-            lanes = getattr(road, "lanes", [])
-            road_length = getattr(road, "length", 1000.0)
+            orientation = self._road_orientation(road, road_index)
+            lanes = tuple(getattr(road, "lanes", []) or [])
             lane_count = max(1, len(lanes))
+            length = float(getattr(road, "length", 1000.0) or 1000.0)
+            thickness = lane_count * self.lane_width + self.road_margin * 2.0
 
-            road_world_x = x_start
-            road_world_y = y_start + road_index * road_spacing
+            if orientation == "vertical":
+                x = vertical_x + vertical_count * (thickness + self.lane_width * 1.2)
+                y = horizontal_y - length * 0.5
+                rect = (x - thickness * 0.5, y, thickness, length)
+                vertical_count += 1
+            else:
+                x = 0.0
+                y = horizontal_y + horizontal_count * (thickness + self.lane_width * 1.2)
+                rect = (x, y - thickness * 0.5, length, thickness)
+                horizontal_count += 1
 
-            # Draw road background
-            road_end_x = road_world_x + road_length
-            x0_screen, y0_screen = self.camera.world_to_screen(road_world_x - 10, road_world_y - 20)
-            x1_screen, y1_screen = self.camera.world_to_screen(
-                road_end_x + 10, road_world_y + lane_count * lane_height + 20
-            )
-            
-            # Only draw if on screen
-            if not self._rect_on_screen(x0_screen, y0_screen, x1_screen, y1_screen):
-                continue
+            lane_views = self._build_lane_views(road, road_index, lanes, orientation, rect, length)
+            road_views.append(RoadView(road, road_index, rect, orientation, tuple(lane_views), length))
 
-            road_rect = self.pygame.Rect(
-                int(min(x0_screen, x1_screen)), int(min(y0_screen, y1_screen)),
-                int(abs(x1_screen - x0_screen)), int(abs(y1_screen - y0_screen))
-            )
-            self.pygame.draw.rect(self.screen, self.edge_color, road_rect, border_radius=8)
-            self.pygame.draw.rect(self.screen, self.road_color, road_rect, 0, border_radius=8)
+        if len(road_views) == 1 and road_views[0].orientation == "horizontal":
+            road_views.append(self._visual_cross_road(road_views[0], vertical_x))
 
-            # Draw road end markers
-            end_x, end_y0 = self.camera.world_to_screen(road_end_x, road_world_y - 5)
-            _, end_y1 = self.camera.world_to_screen(road_end_x, road_world_y + lane_count * lane_height + 5)
-            if -100 < end_x < self.width + 100:
-                self.pygame.draw.line(
-                    self.screen,
-                    self.road_marking_color,
-                    (int(end_x), int(end_y0)),
-                    (int(end_x), int(end_y1)),
-                    2,
+        return road_views
+
+    def _build_lane_views(
+        self,
+        road: Any,
+        road_index: int,
+        lanes: tuple[Any, ...],
+        orientation: str,
+        rect: tuple[float, float, float, float],
+        length: float,
+    ) -> list[LaneView]:
+        lane_objects = lanes if lanes else (None,)
+        x, y, w, h = rect
+        lane_views = []
+        for lane_index, lane in enumerate(lane_objects):
+            direction = self._lane_direction(lane, road, orientation)
+            if orientation == "vertical":
+                lane_x = x + self.road_margin + lane_index * self.lane_width + self.lane_width * 0.5
+                centerline = (lane_x, y + 6.0, lane_x, y + h - 6.0)
+            else:
+                lane_y = y + self.road_margin + lane_index * self.lane_width + self.lane_width * 0.5
+                centerline = (x + 6.0, lane_y, x + w - 6.0, lane_y)
+            lane_views.append(
+                LaneView(
+                    lane=lane,
+                    index=lane_index,
+                    centerline=centerline,
+                    orientation=orientation,
+                    direction=direction,
+                    road_id=getattr(road, "id", road_index + 1),
+                    length=float(getattr(lane, "length", length) or length) if lane is not None else length,
                 )
+            )
+        return lane_views
 
-            # Draw direction arrows
-            arrow_spacing = max(120.0, road_length / 5)
-            arrow_x = road_world_x + arrow_spacing
-            while arrow_x < road_end_x - 40:
-                for lane_index in range(lane_count):
-                    lane_center_y = road_world_y + lane_index * lane_height + lane_height / 2
-                    ax, ay = self.camera.world_to_screen(arrow_x, lane_center_y)
-                    tip_x, tip_y = self.camera.world_to_screen(arrow_x + 16, lane_center_y)
-                    wing_up_x, wing_up_y = self.camera.world_to_screen(arrow_x + 10, lane_center_y - 6)
-                    wing_dn_x, wing_dn_y = self.camera.world_to_screen(arrow_x + 10, lane_center_y + 6)
-                    self.pygame.draw.line(self.screen, self.road_marking_color, (int(ax), int(ay)), (int(tip_x), int(tip_y)), 2)
-                    self.pygame.draw.line(self.screen, self.road_marking_color, (int(tip_x), int(tip_y)), (int(wing_up_x), int(wing_up_y)), 2)
-                    self.pygame.draw.line(self.screen, self.road_marking_color, (int(tip_x), int(tip_y)), (int(wing_dn_x), int(wing_dn_y)), 2)
-                arrow_x += arrow_spacing
+    def _visual_cross_road(self, base: RoadView, center_x: float) -> RoadView:
+        lane_count = max(1, len(base.lanes))
+        thickness = lane_count * self.lane_width + self.road_margin * 2.0
+        length = min(700.0, max(360.0, base.length * 0.7))
+        rect = (center_x - thickness * 0.5, -length * 0.5, thickness, length)
+        lane_views = []
+        for lane_index in range(lane_count):
+            lane_x = rect[0] + self.road_margin + lane_index * self.lane_width + self.lane_width * 0.5
+            lane_views.append(
+                LaneView(
+                    lane=None,
+                    index=lane_index,
+                    centerline=(lane_x, rect[1] + 6.0, lane_x, rect[1] + rect[3] - 6.0),
+                    orientation="vertical",
+                    direction=1,
+                    road_id="cross",
+                    length=length,
+                )
+            )
+        return RoadView(None, -1, rect, "vertical", tuple(lane_views), length)
 
-            # Draw lane separators and labels
-            for lane_index, lane in enumerate(lanes):
-                lane_world_y = road_world_y + lane_index * lane_height
-                lane_world_y_next = lane_world_y + lane_height
+    def _road_orientation(self, road: Any, road_index: int) -> str:
+        raw = getattr(road, "orientation", None) or getattr(road, "direction", None)
+        if isinstance(raw, str):
+            value = raw.lower()
+            if value in ("vertical", "north", "south", "n", "s"):
+                return "vertical"
+            if value in ("horizontal", "east", "west", "e", "w"):
+                return "horizontal"
+        return "horizontal" if road_index % 2 == 0 else "vertical"
 
-                # Draw lane separator line
-                if lane_index > 0:
-                    x0_s, y_sep = self.camera.world_to_screen(road_world_x, lane_world_y)
-                    x1_s, _ = self.camera.world_to_screen(road_end_x, lane_world_y)
-                    self._draw_dashed_line(
-                        (int(x0_s), int(y_sep)),
-                        (int(x1_s), int(y_sep)),
-                        self.lane_color,
-                        dash_length=12,
-                        gap_length=8,
-                    )
+    def _lane_direction(self, lane: Any, road: Any, orientation: str) -> int:
+        raw = getattr(lane, "direction", None) if lane is not None else None
+        if raw is None:
+            raw = getattr(road, "direction", None)
+        if isinstance(raw, (int, float)):
+            return -1 if raw < 0 else 1
+        if isinstance(raw, str):
+            value = raw.lower()
+            if value in ("west", "left", "north", "up", "reverse", "-1"):
+                return -1
+        return 1
 
-                # Draw lane label
-                label_x, label_y = self.camera.world_to_screen(road_world_x + 20, lane_world_y + lane_height / 2)
-                if -100 < label_x < self.width + 100 and -100 < label_y < self.height + 100:
-                    label_text = self.small_font.render(
-                        f"R{getattr(road, 'id', road_index + 1)}L{getattr(lane, 'id', lane_index + 1)}",
-                        True, self.overlay_color
-                    )
-                    self.screen.blit(label_text, (int(label_x), int(label_y) - 8))
+    def _vehicle_world_position(self, vehicle: Any, lane_view: LaneView) -> tuple[float, float]:
+        position = float(getattr(vehicle, "position", 0.0) or 0.0)
+        progress = max(0.0, min(1.0, position / max(lane_view.length, 1.0)))
+        if lane_view.direction < 0:
+            progress = 1.0 - progress
 
-    def _rect_on_screen(self, x0, y0, x1, y1):
-        """Check if a rectangle is at least partially on screen."""
-        return (x0 < self.width and x1 > 0 and y0 < self.height and y1 > 0)
+        x0, y0, x1, y1 = lane_view.centerline
+        return x0 + (x1 - x0) * progress, y0 + (y1 - y0) * progress
 
-    def _draw_dashed_line(self, start, end, color, dash_length=10, gap_length=6):
-        """Draw a dashed line between two points."""
+    def _signal_world_position(self, signal: Any) -> tuple[float, float] | None:
+        raw = getattr(signal, "position", None)
+        if not isinstance(raw, tuple) or len(raw) < 2:
+            return None
+
+        signal_x = float(raw[0])
+        signal_y = float(raw[1])
+        for lane_view in self._lane_lookup.values():
+            lane = lane_view.lane
+            intersection = getattr(lane, "intersection", None) if lane is not None else None
+            get_signal = getattr(intersection, "get_signal_for_lane", None)
+            if callable(get_signal) and get_signal(lane) is signal:
+                x0, y0, x1, y1 = lane_view.centerline
+                progress = max(0.0, min(1.0, signal_x / max(lane_view.length, 1.0)))
+                if lane_view.direction < 0:
+                    progress = 1.0 - progress
+                sx = x0 + (x1 - x0) * progress
+                sy = y0 + (y1 - y0) * progress
+                if lane_view.orientation == "horizontal":
+                    sy -= self.lane_width * 0.75
+                else:
+                    sx += self.lane_width * 0.75
+                return sx, sy
+
+        return signal_x, signal_y
+
+    def _primary_signal_x(self, signals: list[Any], default: float) -> float:
+        for signal in signals:
+            position = getattr(signal, "position", None)
+            if isinstance(position, tuple) and position:
+                return float(position[0])
+        return default
+
+    def _intersection_zones(self) -> list[tuple[float, float, float]]:
+        horizontal = [view for view in self._layout if view.orientation == "horizontal"]
+        vertical = [view for view in self._layout if view.orientation == "vertical"]
+        zones = []
+        for h_view in horizontal:
+            hx, hy, hw, hh = h_view.rect
+            for v_view in vertical:
+                vx, vy, vw, vh = v_view.rect
+                if hx <= vx + vw and vx <= hx + hw and hy <= vy + vh and vy <= hy + hh:
+                    cx = max(hx, vx) + (min(hx + hw, vx + vw) - max(hx, vx)) * 0.5
+                    cy = max(hy, vy) + (min(hy + hh, vy + vh) - max(hy, vy)) * 0.5
+                    zones.append((cx, cy, max(hh, vw) + 4.0))
+        return zones
+
+    def _scene_bounds(self) -> tuple[float, float, float, float]:
+        min_x = min(view.rect[0] for view in self._layout) - self.world_padding
+        min_y = min(view.rect[1] for view in self._layout) - self.world_padding
+        max_x = max(view.rect[0] + view.rect[2] for view in self._layout) + self.world_padding
+        max_y = max(view.rect[1] + view.rect[3] for view in self._layout) + self.world_padding
+        return min_x, min_y, max_x, max_y
+
+    def _draw_vehicle_body(self, center: tuple[int, int], angle: float, color: tuple[int, int, int], vehicle: Any) -> None:
+        length = max(12, int(self.vehicle_size[0] * self.camera.scale))
+        width = max(7, int(self.vehicle_size[1] * self.camera.scale))
+        surface = self.pygame.Surface((length + 4, width + 4), self.pygame.SRCALPHA)
+        rect = surface.get_rect()
+        body = self.pygame.Rect(2, 2, length, width)
+        self.pygame.draw.rect(surface, color, body, border_radius=max(2, int(3 * self.camera.scale)))
+        self.pygame.draw.rect(surface, (14, 16, 17), body, width=1, border_radius=max(2, int(3 * self.camera.scale)))
+
+        if float(getattr(vehicle, "acceleration", 0.0) or 0.0) < -0.2:
+            brake = self.pygame.Rect(3, 3, max(2, length // 7), max(2, width // 4))
+            self.pygame.draw.rect(surface, self.colors["brake"], brake, border_radius=1)
+            brake.bottom = rect.bottom - 3
+            self.pygame.draw.rect(surface, self.colors["brake"], brake, border_radius=1)
+
+        rotated = self.pygame.transform.rotate(surface, angle)
+        draw_rect = rotated.get_rect(center=center)
+        self.screen.blit(rotated, draw_rect)
+
+    def _vehicle_color(self, vehicle: Any, color_index: int) -> tuple[int, int, int]:
+        velocity = float(getattr(vehicle, "velocity", 0.0) or 0.0)
+        acceleration = float(getattr(vehicle, "acceleration", 0.0) or 0.0)
+        if acceleration < -0.35:
+            return self.colors["brake"]
+        if velocity < 0.1:
+            return self.colors["stopped"]
+        palette = [
+            self.colors["vehicle"],
+            self.colors["vehicle_alt"],
+            (129, 202, 116),
+            (181, 129, 220),
+            (236, 226, 105),
+        ]
+        return palette[color_index % len(palette)]
+
+    def _draw_lane_edge_ticks(self, lane_view: LaneView) -> None:
+        x0, y0, x1, y1 = lane_view.centerline
+        if lane_view.orientation == "horizontal":
+            offset = self.lane_width * 0.5
+            self._draw_solid_world_line((x0, y0 - offset), (x1, y1 - offset), self.colors["edge"], 2)
+            self._draw_solid_world_line((x0, y0 + offset), (x1, y1 + offset), self.colors["edge"], 2)
+        else:
+            offset = self.lane_width * 0.5
+            self._draw_solid_world_line((x0 - offset, y0), (x1 - offset, y1), self.colors["edge"], 2)
+            self._draw_solid_world_line((x0 + offset, y0), (x1 + offset, y1), self.colors["edge"], 2)
+
+    def _draw_direction_arrow(self, lane_view: LaneView) -> None:
+        x0, y0, x1, y1 = lane_view.centerline
+        cx = x0 + (x1 - x0) * 0.36
+        cy = y0 + (y1 - y0) * 0.36
+        angle = 0.0 if lane_view.orientation == "horizontal" else math.pi / 2.0
+        if lane_view.direction < 0:
+            angle += math.pi
+        length = 22.0
+        tip = (cx + math.cos(angle) * length, cy + math.sin(angle) * length)
+        tail = (cx - math.cos(angle) * length * 0.45, cy - math.sin(angle) * length * 0.45)
+        left = (tip[0] - math.cos(angle - 0.65) * 10.0, tip[1] - math.sin(angle - 0.65) * 10.0)
+        right = (tip[0] - math.cos(angle + 0.65) * 10.0, tip[1] - math.sin(angle + 0.65) * 10.0)
+        self._draw_solid_world_line(tail, tip, self.colors["lane_dim"], 2)
+        self._draw_solid_world_line(tip, left, self.colors["lane_dim"], 2)
+        self._draw_solid_world_line(tip, right, self.colors["lane_dim"], 2)
+
+    def _draw_stop_line(self, signal_position: tuple[float, float]) -> None:
+        sx, sy = signal_position
+        for lane_view in self._lane_lookup.values():
+            x0, y0, x1, y1 = lane_view.centerline
+            if lane_view.orientation == "horizontal" and abs(sy - y0) < self.lane_width * 1.5:
+                self._draw_solid_world_line((sx, y0 - self.lane_width * 0.45), (sx, y0 + self.lane_width * 0.45), self.colors["lane"], 3)
+                return
+            if lane_view.orientation == "vertical" and abs(sx - x0) < self.lane_width * 1.5:
+                self._draw_solid_world_line((x0 - self.lane_width * 0.45, sy), (x0 + self.lane_width * 0.45, sy), self.colors["lane"], 3)
+                return
+
+    def _draw_hud(self, road_count: int, vehicle_count: int, signal_count: int) -> None:
+        text = f"Roads {road_count}   Vehicles {vehicle_count}   Signals {signal_count}"
+        controls = "SPACE pause   R reset flag   ESC quit   WASD/arrows pan   +/- zoom"
+        if self.paused:
+            text += "   PAUSED"
+        label = self.small_font.render(text, True, self.colors["text"])
+        hint = self.small_font.render(controls, True, self.colors["muted"])
+        self.screen.blit(label, (14, 12))
+        self.screen.blit(hint, (14, 30))
+
+    def _draw_console(self, roads: list[Any], vehicles: list[Any], signals: list[Any]) -> None:
+        if self.frame_count % 30 == 1:
+            print(
+                f"[Renderer] frame={self.frame_count} roads={len(roads)} "
+                f"vehicles={len(vehicles)} signals={len(signals)}"
+            )
+
+    def _draw_dashed_line(
+        self,
+        start: tuple[int, int],
+        end: tuple[int, int],
+        color: tuple[int, int, int],
+        dash: int = 12,
+        gap: int = 10,
+        width: int = 1,
+    ) -> None:
         x0, y0 = start
         x1, y1 = end
-        total_length = max(1, ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5)
-        dx = (x1 - x0) / total_length
-        dy = (y1 - y0) / total_length
-        dist = 0
-        while dist < total_length:
-            seg_start = dist
-            seg_end = min(dist + dash_length, total_length)
-            sx = x0 + dx * seg_start
-            sy = y0 + dy * seg_start
-            ex = x0 + dx * seg_end
-            ey = y0 + dy * seg_end
-            self.pygame.draw.line(self.screen, color, (int(sx), int(sy)), (int(ex), int(ey)), 1)
-            dist += dash_length + gap_length
+        total = math.hypot(x1 - x0, y1 - y0)
+        if total <= 0:
+            return
+        ux = (x1 - x0) / total
+        uy = (y1 - y0) / total
+        distance = 0.0
+        while distance < total:
+            segment_end = min(total, distance + dash)
+            sx = x0 + ux * distance
+            sy = y0 + uy * distance
+            ex = x0 + ux * segment_end
+            ey = y0 + uy * segment_end
+            self.pygame.draw.line(self.screen, color, (int(sx), int(sy)), (int(ex), int(ey)), width)
+            distance += dash + gap
 
-    def _draw_vehicles(self, roads, vehicles):
-        """Draw vehicles using camera-transformed world coordinates."""
-        lane_height = 40.0
-        road_spacing = 150.0
-        x_start = 0.0
-        y_start = 0.0
+    def _draw_solid_world_line(
+        self,
+        start: tuple[float, float],
+        end: tuple[float, float],
+        color: tuple[int, int, int],
+        width: int,
+    ) -> None:
+        self.pygame.draw.line(self.screen, color, self.camera.world_to_screen(*start), self.camera.world_to_screen(*end), width)
 
-        for vehicle in vehicles:
-            lane = getattr(vehicle, "lane", None)
-            if lane is None:
-                continue
+    def _world_rect_center(self, cx: float, cy: float, w: float, h: float) -> tuple[float, float, float, float]:
+        return cx - w * 0.5, cy - h * 0.5, w, h
 
-            # Find road index and lane index
-            road_index = None
-            lane_index = None
-            for r_idx, road in enumerate(roads):
-                lanes = getattr(road, "lanes", [])
-                for l_idx, l in enumerate(lanes):
-                    if l is lane:
-                        road_index = r_idx
-                        lane_index = l_idx
-                        break
-                if road_index is not None:
-                    break
+    def _rect_visible(self, rect: Any, margin: int = 0) -> bool:
+        return rect.right >= -margin and rect.left <= self.width + margin and rect.bottom >= -margin and rect.top <= self.height + margin
 
-            if road_index is None or lane_index is None:
-                continue
-
-            road_length = getattr(lane, "length", 1000.0)
-            position = float(getattr(vehicle, "position", 0.0))
-            velocity = float(getattr(vehicle, "velocity", 0.0))
-            acceleration = float(getattr(vehicle, "acceleration", 0.0))
-
-            # Convert to world coordinates
-            world_x = position
-            world_y = y_start + road_index * road_spacing + lane_index * lane_height + lane_height / 2
-            screen_x, screen_y = self.camera.world_to_screen(world_x, world_y)
-
-            # Only draw if on screen
-            if not (-50 < screen_x < self.width + 50 and -50 < screen_y < self.height + 50):
-                continue
-
-            # Draw vehicle
-            if acceleration < -0.2:
-                vehicle_color = self.braking_vehicle_color
-            elif velocity > 0.5:
-                vehicle_color = self.vehicle_color
-            else:
-                vehicle_color = self.stopped_vehicle_color
-
-            rect = self.pygame.Rect(0, 0, 26, 14)
-            rect.center = (int(screen_x), int(screen_y))
-            self.pygame.draw.rect(self.screen, vehicle_color, rect, border_radius=3)
-            self.pygame.draw.rect(self.screen, (18, 18, 18), rect, 1, border_radius=3)
-
-            # Draw brake lights when decelerating
-            if acceleration < -0.2:
-                brake_left = self.pygame.Rect(rect.left + 2, rect.top + 2, 4, 4)
-                brake_right = self.pygame.Rect(rect.left + 2, rect.bottom - 6, 4, 4)
-                self.pygame.draw.rect(self.screen, (255, 80, 80), brake_left, border_radius=2)
-                self.pygame.draw.rect(self.screen, (255, 80, 80), brake_right, border_radius=2)
-
-            # Draw movement cue
-            if velocity > 0.5:
-                arrow_tip = (rect.right + 6, rect.centery)
-                arrow_tail = (rect.right, rect.centery)
-                self.pygame.draw.line(self.screen, self.road_marking_color, arrow_tail, arrow_tip, 2)
-                self.pygame.draw.line(self.screen, self.road_marking_color, arrow_tip, (rect.right + 2, rect.centery - 3), 2)
-                self.pygame.draw.line(self.screen, self.road_marking_color, arrow_tip, (rect.right + 2, rect.centery + 3), 2)
-
-            # Draw vehicle label
-            v_id = getattr(vehicle, "id", "V")
-            label = self.small_font.render(str(v_id), True, (255, 255, 255))
-            self.screen.blit(label, (int(screen_x) - label.get_width() // 2, int(screen_y) - 14))
-
-    def _draw_signals(self, signals):
-        """Draw traffic signals using camera-transformed world coordinates."""
-        signal_colors = {
-            "RED": (220, 72, 72),
-            "YELLOW": (245, 196, 72),
-            "GREEN": (88, 190, 117),
-        }
-
-        for signal in signals:
-            position = getattr(signal, "position", (0, 0))
-            if not isinstance(position, tuple) or len(position) != 2:
-                continue
-
-            world_x, world_y = position
-            screen_x, screen_y = self.camera.world_to_screen(world_x, world_y)
-
-            # Only draw if on screen
-            if not (-50 < screen_x < self.width + 50 and -50 < screen_y < self.height + 50):
-                continue
-
-            state = getattr(signal, "state", "RED")
-            color = signal_colors.get(state, (200, 200, 200))
-            
-            # Draw signal housing
-            body = self.pygame.Rect(int(screen_x) - 10, int(screen_y) - 22, 20, 44)
-            self.pygame.draw.rect(self.screen, (28, 28, 28), body, border_radius=6)
-            self.pygame.draw.rect(self.screen, self.signal_outline_color, body, 2, border_radius=6)
-            
-            # Draw active light
-            light_center = body.center
-            self.pygame.draw.circle(self.screen, color, light_center, 6)
-            self.pygame.draw.circle(self.screen, (255, 255, 255), light_center, 6, 1)
-
-            # Draw stop line across the lane
-            stop_left_x, stop_left_y = self.camera.world_to_screen(world_x - 4, world_y - 18)
-            stop_right_x, stop_right_y = self.camera.world_to_screen(world_x - 4, world_y + 18)
-            self.pygame.draw.line(
-                self.screen,
-                self.road_marking_color,
-                (int(stop_left_x), int(stop_left_y)),
-                (int(stop_right_x), int(stop_right_y)),
-                3,
-            )
-
-            # Draw signal label
-            sig_id = getattr(signal, "id", "?")
-            label = self.small_font.render(f"S{sig_id}:{state}", True, self.overlay_color)
-            self.screen.blit(label, (body.left - 15, body.bottom + 4))
-
-    def _draw_overlay(self, roads, vehicles, signals):
-        """Draw HUD with simulation and camera state."""
-        # Calculate scene bounds for info
-        scene_bounds = self._calculate_scene_bounds(roads)
-        
-        lines = [
-            f"Frame: {self.frame_count}",
-            f"Roads: {len(roads)}  Vehicles: {len(vehicles)}  Signals: {len(signals)}",
-            f"Zoom: {self.camera.zoom:.2f}x  Pan: ({self.camera.offset_x:.1f}, {self.camera.offset_y:.1f})",
-            f"Scene: X({scene_bounds[0]:.0f}-{scene_bounds[2]:.0f}) Y({scene_bounds[1]:.0f}-{scene_bounds[3]:.0f})",
-            "Controls: ARROWS/WASD pan | +/- zoom | C reset | ESC quit",
-        ]
-
-        x = 12
-        y = 12
-        for line in lines:
-            text = self.small_font.render(line, True, self.overlay_color)
-            self.screen.blit(text, (x, y))
-            y += 16
-
-    def _calculate_scene_bounds(self, roads):
-        """Calculate the bounding box of the scene."""
-        if not roads:
-            return (0, 0, 100, 100)
-
-        min_x = 0
-        max_x = 100
-        min_y = 0
-        max_y = 100
-
-        lane_height = 40.0
-        road_spacing = 150.0
-
-        for road_index, road in enumerate(roads):
-            lanes = getattr(road, "lanes", [])
-            road_length = getattr(road, "length", 1000.0)
-            lane_count = len(lanes) if lanes else 1
-
-            max_x = max(max_x, road_length)
-            max_y = max(max_y, road_index * road_spacing + lane_count * lane_height)
-
-        return (min_x, min_y, max_x, max_y)
-
-    def _auto_fit_scene(self, roads):
-        """Auto-fit camera to show all roads and lanes."""
-        min_x, min_y, max_x, max_y = self._calculate_scene_bounds(roads)
-        self.camera.fit_bounds(min_x, min_y, max_x, max_y, padding=100)
+    def _signal_color(self, state: str) -> tuple[int, int, int]:
+        return {
+            "RED": self.colors["red"],
+            "YELLOW": self.colors["yellow"],
+            "GREEN": self.colors["green"],
+        }.get(state, self.colors["off"])
