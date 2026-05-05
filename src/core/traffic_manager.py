@@ -1,11 +1,16 @@
 """Traffic simulation manager responsible for vehicles, roads, and signals."""
 
-from entities.road import Road
-from entities.lane import Lane
-from entities.intersection import Intersection
-from entities.traffic_signal import TrafficSignal
 from physics.braking.braking_system import BrakingSystem
 from factory.vehicle_factory import VehicleFactory
+from simulation.simple_intersection_scene import (
+    ACTIVE_DEMO_DIRECTIONS,
+    EXIT_POSITION,
+    INTERSECTION_START,
+    MAX_VEHICLES_PER_DEMO_LANE,
+    SPAWN_GAP,
+    build_simple_intersection,
+    spawn_demo_vehicle,
+)
 
 
 class TrafficManager:
@@ -22,46 +27,11 @@ class TrafficManager:
 
     def initialize_scene(self):
         """Create initial simulation scene with roads, lanes, and vehicles."""
-        # Create a road
-        road = Road(road_id=1, length=1000)
-        self.roads.append(road)
-
-        # Create a lane and add to road
-        lane = Lane(lane_id=1, length=1000)
-        road.add_lane(lane)
-
-        # Create initial vehicles
-        vehicle1 = VehicleFactory.create_vehicle("car")
-        self._configure_vehicle(vehicle1)
-        if hasattr(vehicle1, "position"):
-            vehicle1.position = 0.0
-        lane.add_vehicle(vehicle1)
-        self.vehicles.append(vehicle1)
-
-        vehicle2 = VehicleFactory.create_vehicle("car")
-        self._configure_vehicle(vehicle2)
-        if hasattr(vehicle2, "position"):
-            vehicle2.position = 20.0  # spaced behind vehicle1
-        lane.add_vehicle(vehicle2)
-        self.vehicles.append(vehicle2)
-
-        # Create an intersection with a traffic signal
-        intersection = Intersection(intersection_id=1)
-        self.intersections.append(intersection)
-        
-        # Create a traffic signal positioned on the road where vehicles can react to it
-        # Positioned at x=50 so vehicles starting at 0 and 20 will see it approaching
-        signal = TrafficSignal(signal_id=1, position=(50, 20))
-        self.signals.append(signal)
-        
-        # Associate signal with lane in the intersection
-        intersection.add_signal(lane, signal)
-        lane.set_intersection(intersection)
-        
-        # Attach all vehicles as observers to the signal
-        for vehicle in self.vehicles:
-            self._attach_vehicle_to_signals(vehicle)
-        signal.notify()
+        scene = build_simple_intersection()
+        self.roads = scene["roads"]
+        self.vehicles = scene["vehicles"]
+        self.signals = scene["signals"]
+        self.intersections = scene["intersections"]
 
     def update(self, dt):
         """Update all traffic entities in the correct order.
@@ -80,6 +50,8 @@ class TrafficManager:
         # Step 2: Update all roads (lanes and vehicles)
         for road in self.roads:
             road.update(dt)
+
+        self._maintain_demo_traffic()
 
     def spawn_vehicle(self):
         """Spawn a new vehicle and add to first lane."""
@@ -101,3 +73,68 @@ class TrafficManager:
     def _attach_vehicle_to_signals(self, vehicle):
         for signal in self.signals:
             signal.attach(vehicle)
+
+    def _maintain_demo_traffic(self):
+        lanes = self._demo_lanes()
+        if not lanes:
+            return
+
+        self._remove_exited_demo_vehicles()
+        self._detach_cleared_demo_vehicles()
+        for lane in lanes:
+            lane_vehicles = [
+                vehicle for vehicle in lane.vehicles
+                if getattr(vehicle, "render_direction", None) == lane.render_direction
+            ]
+            if len(lane_vehicles) >= MAX_VEHICLES_PER_DEMO_LANE:
+                continue
+            if lane_vehicles and min(vehicle.position for vehicle in lane_vehicles) < SPAWN_GAP:
+                continue
+
+            vehicle = spawn_demo_vehicle(lane)
+            self.vehicles.append(vehicle)
+            signal = lane.intersection.get_signal_for_lane(lane)
+            if signal is not None:
+                signal.attach(vehicle)
+                vehicle.on_signal_change(signal.state)
+
+    def _demo_lanes(self):
+        lanes = []
+        for road in self.roads:
+            for lane in road.lanes:
+                if getattr(lane, "render_direction", None) in ACTIVE_DEMO_DIRECTIONS:
+                    lanes.append(lane)
+        return lanes
+
+    def _remove_exited_demo_vehicles(self):
+        for vehicle in list(self.vehicles):
+            if not hasattr(vehicle, "render_direction"):
+                continue
+            if getattr(vehicle, "position", 0.0) <= EXIT_POSITION:
+                continue
+
+            lane = getattr(vehicle, "lane", None)
+            if lane is not None:
+                signal = lane.intersection.get_signal_for_lane(lane) if lane.intersection else None
+                if signal is not None:
+                    signal.detach(vehicle)
+                lane.remove_vehicle(vehicle)
+
+            if vehicle in self.vehicles:
+                self.vehicles.remove(vehicle)
+
+    def _detach_cleared_demo_vehicles(self):
+        for vehicle in self.vehicles:
+            if not hasattr(vehicle, "render_direction"):
+                continue
+            if getattr(vehicle, "position", 0.0) < INTERSECTION_START:
+                continue
+
+            lane = getattr(vehicle, "lane", None)
+            if lane is None or lane.intersection is None:
+                continue
+
+            signal = lane.intersection.get_signal_for_lane(lane)
+            if signal is not None:
+                signal.detach(vehicle)
+            vehicle.signal_state = None

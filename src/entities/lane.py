@@ -35,6 +35,7 @@ class Lane:
         self.width = width
         self.vehicles = []
         self.intersection = None
+        self.render_direction: str | None = None
         if strategy is not None:
             self.strategy = strategy
         elif update_fn is not None:

@@ -9,7 +9,17 @@ from __future__ import annotations
 
 import math
 import random
-from typing import Any, Iterable
+from typing import Any, Iterable, cast
+
+
+WIDTH = 800
+HEIGHT = 800
+CENTER = (400, 400)
+INTERSECTION_START = 350
+INTERSECTION_END = 450
+STOP_LINE = 332
+CAR_LENGTH = 46
+CAR_WIDTH = 28
 
 
 class Camera:
@@ -61,21 +71,21 @@ class Renderer:
     def __init__(
         self,
         traffic_manager: Any | None = None,
-        width: int = 1200,
-        height: int = 800,
-        title: str = "FlowSync Smart Traffic UI",
+        width: int = WIDTH,
+        height: int = HEIGHT,
+        title: str = "FlowSync Intersection Demo",
     ) -> None:
         self.traffic_manager = traffic_manager
         self.width = width
         self.height = height
         self.title = title
 
-        self.pygame = None
-        self.screen = None
-        self.clock = None
-        self.font = None
-        self.small_font = None
-        self.initialized = False
+        self.pygame: Any = None
+        self.screen: Any = None
+        self.clock: Any = None
+        self.font: Any = None
+        self.small_font: Any = None
+        self.initialized: bool = False
         self.console_fallback = False
 
         self.camera = Camera(width, height)
@@ -177,6 +187,12 @@ class Renderer:
 
         dt = self.clock.tick(60) / 1000.0 if self.clock is not None else 1.0 / 60.0
         dt = max(0.001, min(dt, 0.05))
+
+        if self._is_presentation_scene(real_vehicles, backend_signals):
+            self._draw_presentation_scene(real_vehicles, backend_signals)
+            self.pygame.display.flip()
+            self._events_processed_since_draw = False
+            return
 
         if not real_vehicles and not self.ui_vehicles:
             self._spawn_initial_flow()
@@ -333,6 +349,171 @@ class Renderer:
             self.pygame.quit()
         self.initialized = False
 
+    def _is_presentation_scene(self, vehicles: Iterable[Any], signals: Iterable[Any]) -> bool:
+        return bool(list(signals)) and any(hasattr(vehicle, "render_direction") for vehicle in vehicles)
+
+    def _draw_presentation_scene(self, vehicles: Iterable[Any], signals: Iterable[Any]) -> None:
+        self.screen.fill((45, 95, 68))
+        self._draw_city_blocks()
+        self._draw_presentation_roads()
+        self._draw_presentation_lanes()
+        self._draw_presentation_signals(signals)
+
+        for vehicle in vehicles:
+            self._draw_presentation_vehicle(vehicle)
+
+        self._draw_presentation_panel(vehicles, signals)
+
+    def _draw_city_blocks(self) -> None:
+        blocks = [
+            (44, 54, 250, 250),
+            (506, 54, 250, 250),
+            (44, 506, 250, 250),
+            (506, 506, 250, 250),
+        ]
+        for rect_data in blocks:
+            rect = self.pygame.Rect(rect_data)
+            self.pygame.draw.rect(self.screen, (64, 121, 86), rect, border_radius=8)
+            self.pygame.draw.rect(self.screen, (86, 143, 104), rect, width=2, border_radius=8)
+
+    def _draw_presentation_roads(self) -> None:
+        road = (48, 52, 55)
+        edge = (31, 34, 36)
+        h_edge = self.pygame.Rect(0, 336, WIDTH, 128)
+        v_edge = self.pygame.Rect(336, 0, 128, HEIGHT)
+        h_road = self.pygame.Rect(0, 350, WIDTH, 100)
+        v_road = self.pygame.Rect(350, 0, 100, HEIGHT)
+
+        self.pygame.draw.rect(self.screen, edge, h_edge)
+        self.pygame.draw.rect(self.screen, edge, v_edge)
+        self.pygame.draw.rect(self.screen, road, h_road)
+        self.pygame.draw.rect(self.screen, road, v_road)
+        self.pygame.draw.rect(self.screen, (62, 66, 69), (350, 350, 100, 100))
+        self.pygame.draw.rect(self.screen, (92, 98, 96), (350, 350, 100, 100), width=2)
+
+    def _draw_presentation_lanes(self) -> None:
+        white = (238, 240, 234)
+        yellow = (245, 203, 80)
+        self.pygame.draw.line(self.screen, yellow, (0, 400), (STOP_LINE - 10, 400), 3)
+        self.pygame.draw.line(self.screen, yellow, (462, 400), (800, 400), 3)
+        self.pygame.draw.line(self.screen, yellow, (400, 0), (400, STOP_LINE - 10), 3)
+        self.pygame.draw.line(self.screen, yellow, (400, 462), (400, 800), 3)
+
+        self.pygame.draw.line(self.screen, (180, 185, 181), (INTERSECTION_START, INTERSECTION_START), (INTERSECTION_START, INTERSECTION_END), 2)
+        self.pygame.draw.line(self.screen, (180, 185, 181), (INTERSECTION_START, INTERSECTION_START), (INTERSECTION_END, INTERSECTION_START), 2)
+        self.pygame.draw.line(self.screen, white, (STOP_LINE, 354), (STOP_LINE, 446), 6)
+        self.pygame.draw.line(self.screen, white, (354, STOP_LINE), (446, STOP_LINE), 6)
+        self._draw_crosswalk((STOP_LINE + 8, 350), "H")
+        self._draw_crosswalk((350, STOP_LINE + 8), "V")
+        self._draw_arrow((120, 382), "E")
+        self._draw_arrow((382, 120), "S")
+        self._draw_small_label("West to East", (92, 456))
+        self._draw_small_label("North to South", (456, 92))
+        self._draw_small_label("Stop before intersection", (188, 314))
+
+    def _draw_crosswalk(self, pos: tuple[int, int], orientation: str) -> None:
+        x, y = pos
+        color = (222, 225, 220)
+        for offset in range(0, 84, 14):
+            if orientation == "H":
+                self.pygame.draw.rect(self.screen, color, (x + offset, y + 4, 7, 92))
+            else:
+                self.pygame.draw.rect(self.screen, color, (x + 4, y + offset, 92, 7))
+
+    def _draw_arrow(self, pos: tuple[int, int], direction: str) -> None:
+        x, y = pos
+        color = (218, 224, 219)
+        if direction == "E":
+            points = [(x + 28, y), (x + 10, y - 10), (x + 10, y - 4), (x - 22, y - 4), (x - 22, y + 4), (x + 10, y + 4), (x + 10, y + 10)]
+        else:
+            points = [(x, y + 28), (x - 10, y + 10), (x - 4, y + 10), (x - 4, y - 22), (x + 4, y - 22), (x + 4, y + 10), (x + 10, y + 10)]
+        self.pygame.draw.polygon(self.screen, color, points)
+
+    def _draw_presentation_signals(self, signals: Iterable[Any]) -> None:
+        for signal in signals:
+            group = getattr(signal, "render_group", "HORIZONTAL")
+            if group == "VERTICAL":
+                self._draw_traffic_light((464, 300), signal, "North-South")
+            else:
+                self._draw_traffic_light((292, 420), signal, "West-East")
+
+    def _draw_traffic_light(self, pos: tuple[int, int], signal: Any, label: str) -> None:
+        x, y = pos
+        state = str(getattr(signal, "state", "RED")).upper()
+        lamp_colors = {
+            "RED": (238, 61, 57),
+            "YELLOW": (248, 205, 75),
+            "GREEN": (72, 202, 106),
+        }
+        body = self.pygame.Rect(x, y, 42, 94)
+        self.pygame.draw.rect(self.screen, (9, 10, 11), body.move(3, 4), border_radius=9)
+        self.pygame.draw.rect(self.screen, (22, 24, 25), body, border_radius=9)
+        self.pygame.draw.rect(self.screen, (4, 5, 6), body, width=2, border_radius=9)
+        for index, lamp in enumerate(("RED", "YELLOW", "GREEN")):
+            color = lamp_colors[lamp] if state == lamp else (70, 74, 74)
+            center = (x + 21, y + 18 + index * 29)
+            if state == lamp:
+                self.pygame.draw.circle(self.screen, (*color, 90), center, 17)
+            self.pygame.draw.circle(self.screen, color, center, 10)
+            self.pygame.draw.circle(self.screen, (4, 5, 6), center, 10, 2)
+        self._draw_small_label(label, (x - 12, y + 100))
+
+    def _draw_presentation_vehicle(self, vehicle: Any) -> None:
+        direction = getattr(vehicle, "render_direction", "WEST_EAST")
+        position = int(getattr(vehicle, "position", 0.0) or 0.0)
+        velocity = float(getattr(vehicle, "velocity", 0.0) or 0.0)
+        stopped = velocity < 0.1
+        color = (233, 77, 68) if stopped else (64, 156, 229)
+
+        if direction == "NORTH_SOUTH":
+            rect = self.pygame.Rect(376, position - CAR_LENGTH, CAR_WIDTH, CAR_LENGTH)
+        elif direction == "EAST_WEST":
+            rect = self.pygame.Rect(WIDTH - position, 416, CAR_LENGTH, CAR_WIDTH)
+        elif direction == "SOUTH_NORTH":
+            rect = self.pygame.Rect(416, HEIGHT - position, CAR_WIDTH, CAR_LENGTH)
+        else:
+            rect = self.pygame.Rect(position - CAR_LENGTH, 376, CAR_LENGTH, CAR_WIDTH)
+
+        self.pygame.draw.rect(self.screen, (7, 8, 9), rect.move(4, 5), border_radius=7)
+        self.pygame.draw.rect(self.screen, color, rect, border_radius=7)
+        self.pygame.draw.rect(self.screen, (188, 226, 246), rect.inflate(-18, -12), border_radius=4)
+        self.pygame.draw.rect(self.screen, (8, 10, 11), rect, width=2, border_radius=7)
+
+    def _draw_presentation_panel(self, vehicles: Iterable[Any], signals: Iterable[Any]) -> None:
+        signals = list(signals)
+        vehicles = list(vehicles)
+        rect = self.pygame.Rect(18, 18, 278, 134)
+        panel = self.pygame.Surface(rect.size, self.pygame.SRCALPHA)
+        panel.fill((16, 20, 22, 220))
+        self.screen.blit(panel, rect.topleft)
+        self.pygame.draw.rect(self.screen, (86, 96, 96), rect, width=1, border_radius=8)
+
+        self._draw_text("FlowSync Intersection", (34, 32), self.font, (245, 247, 242))
+        self._draw_text("Coordinated two-signal demo", (34, 57), self.small_font, (178, 187, 182))
+        y = 84
+        for signal in signals:
+            group = getattr(signal, "render_group", "HORIZONTAL").title()
+            state = str(getattr(signal, "state", "RED")).upper()
+            timer = float(getattr(signal, "timer", 0.0) or 0.0)
+            self._draw_text(f"{group}: {state}  {timer:04.1f}s", (34, y), self.small_font, self._state_color(state))
+            y += 20
+        stopped = sum(1 for vehicle in vehicles if float(getattr(vehicle, "velocity", 0.0) or 0.0) < 0.1)
+        self._draw_text(f"Vehicles: {len(vehicles)}   Stopped: {stopped}", (34, y), self.small_font, (218, 224, 219))
+
+    def _draw_small_label(self, text: str, pos: tuple[int, int]) -> None:
+        self._draw_text(text, pos, self.small_font, (236, 239, 235))
+
+    def _draw_text(self, text: str, pos: tuple[int, int], font: Any, color: tuple[int, int, int]) -> None:
+        surface = font.render(text, True, color)
+        self.screen.blit(surface, pos)
+
+    def _state_color(self, state: str) -> tuple[int, int, int]:
+        return {
+            "RED": (255, 111, 103),
+            "YELLOW": (255, 220, 105),
+            "GREEN": (108, 230, 137),
+        }.get(state, (236, 239, 235))
+
     def _handle_keydown(self, key: int) -> bool:
         if key == self.pygame.K_ESCAPE:
             self.running = False
@@ -401,13 +582,13 @@ class Renderer:
         manager = self.traffic_manager
         if roads is None and manager is not None:
             getter = getattr(manager, "get_roads", None)
-            roads = getter() if callable(getter) else getattr(manager, "roads", [])
+            roads = cast(list[Any], getter() if callable(getter) else getattr(manager, "roads", []))
         if vehicles is None and manager is not None:
             getter = getattr(manager, "get_vehicles", None)
-            vehicles = getter() if callable(getter) else getattr(manager, "vehicles", [])
+            vehicles = cast(list[Any], getter() if callable(getter) else getattr(manager, "vehicles", []))
         if signals is None and manager is not None:
             getter = getattr(manager, "get_signals", None)
-            signals = getter() if callable(getter) else getattr(manager, "signals", [])
+            signals = cast(list[Any], getter() if callable(getter) else getattr(manager, "signals", []))
         return list(roads or []), list(vehicles or []), list(signals or [])
 
     def _build_lane_geometry(self) -> dict[str, dict[str, Any]]:

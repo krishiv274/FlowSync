@@ -36,6 +36,7 @@ class TrafficSignal:
 		self.id = signal_id
 		self.position = position
 		self.cycle_times = default_cycle_times if cycle_times is None else dict(cycle_times)
+		self.render_group: str | None = None
 
 		for s in (self.RED, self.GREEN, self.YELLOW):
 			if s not in self.cycle_times:

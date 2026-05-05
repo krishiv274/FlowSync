@@ -17,6 +17,8 @@ class Vehicle:
         self.physics_model = physics_model
         self.braking_strategy = braking_strategy
         self.signal_state = None
+        self.render_direction: str | None = None
+        self.lane: object | None = None
 
     def update(self, dt, lead_vehicle=None, distance_to_signal=None, **kwargs):
         if lead_vehicle is None and "lead" in kwargs:
