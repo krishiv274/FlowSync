@@ -4,17 +4,18 @@ FlowSync is a Python-based traffic simulation project focused on building a clea
 
 ## Project Status
 
-This repository is currently in an **early development stage**.
+This repository now has a working simulation architecture with the core control flow in place.
 
-Implemented today:
-- Basic Pygame application loop in `main.py`
-- Initial package/module structure for simulation, entities, physics, and rendering
-- Starter entity implementation in `entities/vehicle.py`
+Implemented so far:
+- `SimulationController` and `TrafficManager` orchestrate the simulation loop
+- Roads, intersections, lanes, and traffic signals are integrated into the update flow
+- Vehicles use physics and braking models for motion decisions
+- Tests cover the simulation flow, road network, signals, intersections, and edge cases
 
-Planned next:
-- Real traffic simulation loop
-- IDM-based motion and braking strategies
-- Signal-aware vehicle behavior and scheduling
+Current focus:
+- Refining lane, road, and intersection behavior
+- Expanding vehicle dynamics and signal-aware responses
+- Hardening the simulation with additional edge and stress coverage
 
 ## Goals
 
@@ -22,15 +23,21 @@ Planned next:
 - Keep domain components extensible for future models (IDM, lane changing, adaptive control)
 - Support experimentation for traffic engineering and autonomous systems scenarios
 
-## Architecture Direction
+## High-Level Architecture
 
-Target architecture:
-
-```text
-SimulationController -> TrafficManager -> Entities -> Physics -> Rendering
+```mermaid
+flowchart TD
+    A[SimulationController] --> B[TrafficManager]
+    B --> C[Road]
+    B --> D[Intersection]
+    C --> E[Lane]
+    D --> F[TrafficSignal]
+    E <--> F
+    E --> G[Vehicle]
+    G --> H[Physics + Braking]
 ```
 
-The repository already contains these modules and interfaces as a scaffold, with implementation to be expanded incrementally.
+This is the current control and data flow used by the simulation, with the controller and manager coordinating updates across the road network and vehicle dynamics.
 
 ## Repository Structure
 
@@ -75,11 +82,10 @@ python src/main.py
 
 ## Roadmap
 
-- Implement traffic manager and simulation controller flow
-- Expand vehicle model and IDM integration in `physics/`
-- Add traffic signals, lane/intersection logic, and observer-based updates
-- Introduce tests and validation scenarios
+- Continue refining the road network update flow and vehicle behavior
+- Expand physics and braking strategies for more realistic driving models
 - Add richer rendering and simulation controls
+- Grow test coverage for stress and integration scenarios
 
 ## Contributing
 
