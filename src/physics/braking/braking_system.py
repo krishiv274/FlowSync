@@ -30,6 +30,10 @@ class BrakingSystem(IBrakingStrategy):
         max_acceleration = abs(getattr(vehicle.physics_model, "max_acceleration", 3.0))
         comfortable_braking = abs(getattr(vehicle.physics_model, "comfortable_braking", 2.0))
 
+        signal_braking = self._signal_braking_deceleration(vehicle, environment, comfortable_braking, max_acceleration)
+        if signal_braking is not None:
+            return signal_braking
+
         if gap is not None and gap <= self.min_gap:
             return -max_acceleration
 
@@ -38,6 +42,22 @@ class BrakingSystem(IBrakingStrategy):
             return -max_acceleration
 
         return -comfortable_braking
+
+    def _signal_braking_deceleration(self, vehicle, environment, comfortable_braking, max_acceleration):
+        if not self._should_brake_for_signal(environment):
+            return None
+
+        distance = environment.get("distance_to_signal")
+        if distance is None or distance <= 0:
+            return -max_acceleration
+
+        velocity = max(0.0, getattr(vehicle, "velocity", 0.0))
+        if velocity <= 0.0:
+            return -comfortable_braking
+
+        required_deceleration = (velocity * velocity) / (2.0 * max(distance, 0.1))
+        braking_strength = max(comfortable_braking, required_deceleration)
+        return -braking_strength
 
     def _should_brake_for_signal(self, environment):
         signal_state = environment.get("signal_state")
